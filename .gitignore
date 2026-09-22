@@ -1,1 +1,44 @@
+# Dependencies
+node_modules/
+.pnp/
+.pnp.*
+
+# Next.js and production output
+.next/
+out/
+build/
+
+# Tests and coverage
+coverage/
+test-results/
+playwright-report/
+blob-report/
+
+# Local configuration and secrets
+.env*
+!.env.example
+*.pem
+
+# Local assets and generated exports
+data/
+yggdrasil-data/
+exports/
+
+# Tool caches and scratch work
+*.tsbuildinfo
+next-env.d.ts
+.superpowers/
+work/
 .worktrees/
+
+# Package-manager and debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
