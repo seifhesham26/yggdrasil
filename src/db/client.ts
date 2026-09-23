@@ -1,5 +1,5 @@
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
+import { Pool } from "pg";
+import { drizzle } from "drizzle-orm/node-postgres";
 
 import { serverEnv } from "../lib/env/server";
 import * as schema from "./schema";
@@ -7,8 +7,10 @@ import * as schema from "./schema";
 type Database = ReturnType<typeof createDatabase>;
 
 function createDatabase() {
-  const sql = neon(serverEnv.DATABASE_URL);
-  return drizzle({ client: sql, schema });
+  // Neon accepts PostgreSQL connections. Unlike neon-http, this driver has
+  // real Drizzle transactions for multi-table import state changes.
+  const pool = new Pool({ connectionString: serverEnv.DATABASE_URL, max: 5 });
+  return drizzle({ client: pool, schema });
 }
 
 let instance: Database | undefined;

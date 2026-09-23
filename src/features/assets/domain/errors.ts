@@ -5,7 +5,8 @@ export type ImportErrorCode =
   | "INVALID_ARCHIVE"
   | "ARCHIVE_LIMIT_EXCEEDED"
   | "NO_PRIMARY_MODEL"
-  | "AMBIGUOUS_PRIMARY_MODEL";
+  | "AMBIGUOUS_PRIMARY_MODEL"
+  | "IMPORT_FAILED";
 
 export class AssetImportError extends Error {
   constructor(
