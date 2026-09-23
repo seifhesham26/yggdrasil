@@ -83,6 +83,28 @@ describe("buildImportManifest", () => {
     expect(result.attributionFiles[0].relativePath).toBe("folder/LICENSE.txt");
   });
 
+  it("accepts OBJ packages and keeps MTL and texture dependencies", async () => {
+    const result = await buildImportManifest([
+      file("scene/model.obj", bytes("mtllib model.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")),
+      file("scene/model.mtl", bytes("newmtl material\nmap_Kd albedo.png\n")),
+      file("scene/albedo.png", new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+    ]);
+    expect(result.primaryModel.relativePath).toBe("scene/model.obj");
+    expect(result.dependencies.map((entry) => entry.relativePath)).toEqual(["scene/model.mtl", "scene/albedo.png"]);
+  });
+
+  it("names a missing OBJ material dependency", async () => {
+    await expect(buildImportManifest([
+      file("model.obj", bytes("mtllib missing.mtl\nv 0 0 0\n")),
+    ])).rejects.toMatchObject({ code: "MISSING_DEPENDENCY", message: /missing\.mtl/ });
+  });
+
+  it("accepts a legal binary FBX signature", async () => {
+    const header = new TextEncoder().encode("Kaydara FBX Binary  \\0");
+    const result = await buildImportManifest([file("model.fbx", header)]);
+    expect(result.primaryModel.relativePath).toBe("model.fbx");
+  });
+
   it("rejects mixing ZIP and direct files", async () => {
     await rejectsCode([zipFile({ "hero.glb": glb }), file("second.glb", glb)], "INVALID_ARCHIVE");
   });

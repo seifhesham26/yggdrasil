@@ -6,8 +6,8 @@ import type { ImportFile, ImportManifest } from "../domain/types";
 const MAX_ENTRIES = 10_000;
 const MAX_EXPANDED_BYTES = 1024 ** 3;
 const MAX_RATIO = 100;
-const allowed = new Set([".gltf", ".glb", ".bin", ".png", ".jpg", ".jpeg", ".webp", ".ktx2", ".txt", ".md"]);
-const modelExtensions = new Set([".gltf", ".glb"]);
+const allowed = new Set([".gltf", ".glb", ".fbx", ".obj", ".mtl", ".bin", ".png", ".jpg", ".jpeg", ".webp", ".ktx2", ".txt", ".md"]);
+const modelExtensions = new Set([".gltf", ".glb", ".fbx", ".obj"]);
 const attributionExtensions = new Set([".txt", ".md"]);
 const imageExtensions = new Set([".png", ".jpg", ".jpeg", ".webp", ".ktx2"]);
 const expectedMime: Record<string, string> = {
@@ -44,6 +44,48 @@ function validateName(path: string, allowZip = false): string {
     fail("UNSUPPORTED_FILE", `Unsupported import file: ${path}`);
   }
   return normalized;
+}
+
+function dependencyPath(base: string, referenced: string): string {
+  if (!referenced || referenced.includes("\\") || referenced.includes(":") || referenced.startsWith("/")) {
+    fail("INVALID_PATH", `Unsafe model dependency URI: ${referenced}`);
+  }
+  const baseParts = base.split("/");
+  baseParts.pop();
+  const parts = [...baseParts, ...referenced.split("/")];
+  const result: string[] = [];
+  for (const part of parts) {
+    if (!part || part === ".") continue;
+    if (part === "..") {
+      if (!result.length) fail("INVALID_PATH", `Model dependency escapes package: ${referenced}`);
+      result.pop();
+    } else result.push(part);
+  }
+  return result.join("/");
+}
+
+function validateObjDependencies(model: ImportFile, files: Map<string, ImportFile>): void {
+  const text = decoder.decode(model.bytes);
+  const references = [...text.matchAll(/^\s*mtllib\s+(.+)$/gim)].flatMap((match) => match[1].trim().split(/\s+/));
+  if (!/^\s*(?:v|f)\s+/m.test(text)) fail("INVALID_FILE", `Malformed OBJ model: ${model.relativePath}`);
+  for (const reference of references) {
+    const path = dependencyPath(model.relativePath, reference);
+    if (!files.has(path)) fail("MISSING_DEPENDENCY", `OBJ model references missing MTL file: ${path}`);
+    const mtl = decoder.decode(files.get(path)!.bytes);
+    for (const match of mtl.matchAll(/^\s*(?:map_[^\s]+|bump|disp|decal)\s+(.+)$/gim)) {
+      const texture = match[1].trim().split(/\s+/).at(-1)!;
+      const texturePath = dependencyPath(path, texture);
+      if (!files.has(texturePath)) fail("MISSING_DEPENDENCY", `MTL file references missing texture: ${texturePath}`);
+    }
+  }
+}
+
+function validateFbx(file: ImportFile): void {
+  const binaryHeader = new TextDecoder("latin1").decode(file.bytes.subarray(0, 21));
+  const asciiHeader = new TextDecoder("utf-8").decode(file.bytes.subarray(0, 256));
+  if (!binaryHeader.startsWith("Kaydara FBX Binary") && !/^\s*;\s*FBX\s+/i.test(asciiHeader)) {
+    fail("INVALID_FILE", `Malformed FBX model: ${file.relativePath}`);
+  }
 }
 
 function uint16(view: DataView, offset: number): number {
@@ -183,11 +225,17 @@ export async function buildImportManifest(entries: ImportFile[]): Promise<Import
         fail("INVALID_FILE", `Invalid glTF JSON: ${relativePath}`);
       }
     }
+    if (ext === ".obj") {
+      try { decoder.decode(entry.bytes); } catch { fail("INVALID_FILE", `Malformed OBJ model: ${relativePath}`); }
+    }
+    if (ext === ".fbx") validateFbx(entry);
     normalized.push({ relativePath, bytes: entry.bytes });
   }
   const models = normalized.filter((entry) => modelExtensions.has(extension(entry.relativePath)));
   if (!models.length) fail("NO_PRIMARY_MODEL", "Import contains no glTF or GLB model");
   if (models.length > 1) throw new AssetImportError("AMBIGUOUS_PRIMARY_MODEL", "Select one primary model", models.map((entry) => entry.relativePath));
+  const byPath = new Map(normalized.map((entry) => [entry.relativePath, entry]));
+  if (extension(models[0].relativePath) === ".obj") validateObjDependencies(models[0], byPath);
   return {
     primaryModel: models[0],
     dependencies: normalized.filter((entry) => !modelExtensions.has(extension(entry.relativePath)) && !attributionExtensions.has(extension(entry.relativePath))),

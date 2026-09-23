@@ -1,0 +1,1 @@
+ALTER TYPE "public"."asset_file_role" ADD VALUE 'source' BEFORE 'dependency';

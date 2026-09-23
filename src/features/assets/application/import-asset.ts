@@ -5,13 +5,14 @@ import { AssetImportError } from "../domain/errors";
 import type { AssetAnalysis, ImportFile } from "../domain/types";
 import { analyzeGltf } from "../infrastructure/gltf-analyzer";
 import { buildImportManifest } from "../infrastructure/import-manifest";
+import { convertModelToGlb } from "../infrastructure/model-converter";
 import type { AssetRepository, StoredAssetFile } from "../infrastructure/asset-repository";
 
 export type ImportAssetRequest = { ownerId: string; name: string; entries: ImportFile[] };
 export type ImportAssetResult = { assetId: string; sourceId: string; analysis: AssetAnalysis };
 
 const MIME: Record<string, string> = {
-  gltf: "model/gltf+json", glb: "model/gltf-binary", bin: "application/octet-stream",
+  gltf: "model/gltf+json", glb: "model/gltf-binary", fbx: "application/octet-stream", obj: "text/plain", mtl: "text/plain", bin: "application/octet-stream",
   png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", ktx2: "image/ktx2",
   txt: "text/plain", md: "text/markdown",
 };
@@ -33,13 +34,26 @@ export function createImportAsset(deps: {
   repository: AssetRepository;
   buildManifest: typeof buildImportManifest;
   analyze: typeof analyzeGltf;
+  convert?: typeof convertModelToGlb;
   createId: () => string;
 }) {
   return async function importAsset(request: ImportAssetRequest): Promise<ImportAssetResult> {
     const manifest = await deps.buildManifest(request.entries);
     const importId = deps.createId();
     const stagedPrefix = parseStorageKey(`staging/${importId}`);
-    const files = [manifest.primaryModel, ...manifest.dependencies, ...manifest.attributionFiles];
+    const sourceFiles = [manifest.primaryModel, ...manifest.dependencies, ...manifest.attributionFiles];
+    const sourceExtension = manifest.primaryModel.relativePath.slice(manifest.primaryModel.relativePath.lastIndexOf(".") + 1).toLowerCase();
+    let analysisFile = manifest.primaryModel;
+    let conversionWarnings: Array<{ code: string; message: string }> = [];
+    let converted: ImportFile | undefined;
+    if (sourceExtension === "obj" || sourceExtension === "fbx") {
+      if (!deps.convert) throw new AssetImportError("IMPORT_FAILED", `No converter is configured for ${sourceExtension.toUpperCase()} imports.`);
+      const result = await deps.convert({ format: sourceExtension, relativePath: manifest.primaryModel.relativePath, bytes: manifest.primaryModel.bytes });
+      converted = { relativePath: `__normalized/${manifest.primaryModel.relativePath.replace(/\.[^.]+$/, ".glb")}`, bytes: result.bytes };
+      analysisFile = converted;
+      conversionWarnings = result.warnings;
+    }
+    const files = [...sourceFiles, ...(converted ? [converted] : [])];
     const created = await deps.repository.createImport({ ownerId: request.ownerId, name: request.name });
     const finalPrefix = parseStorageKey(`assets/${created.assetId}/source`);
     let committed = false;
@@ -47,11 +61,15 @@ export function createImportAsset(deps: {
       for (const file of files) {
         await deps.storage.put(parseStorageKey(`${stagedPrefix}/${file.relativePath}`), file.bytes);
       }
-      const analysis = await deps.analyze(deps.storage, parseStorageKey(`${stagedPrefix}/${manifest.primaryModel.relativePath}`));
+      const analysisResult = await deps.analyze(deps.storage, parseStorageKey(`${stagedPrefix}/${analysisFile.relativePath}`));
+      const analysis = conversionWarnings.length
+        ? { ...analysisResult, warnings: [...analysisResult.warnings, ...conversionWarnings.map((warning) => ({ ...warning, severity: "warning" as const }))] }
+        : analysisResult;
       const records = [
-        fileRecord(manifest.primaryModel, finalPrefix, "model"),
+        fileRecord(manifest.primaryModel, finalPrefix, converted ? "source" : "model"),
         ...manifest.dependencies.map((file) => fileRecord(file, finalPrefix, "dependency")),
         ...manifest.attributionFiles.map((file) => fileRecord(file, finalPrefix, "attribution")),
+        ...(converted ? [fileRecord(converted, finalPrefix, "model")] : []),
       ];
       await deps.storage.commitTree(stagedPrefix, finalPrefix);
       committed = true;

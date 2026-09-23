@@ -61,7 +61,12 @@ export function createImportHandler(deps: {
     } catch (error) {
       if (error instanceof AssetImportError) {
         const status = error.code === "IMPORT_FAILED" ? 500 : 422;
-        return errorResponse(status, error.code, error.code === "AMBIGUOUS_PRIMARY_MODEL" ? { candidates: error.candidates } : {});
+        const details = error.code === "AMBIGUOUS_PRIMARY_MODEL"
+          ? { candidates: error.candidates }
+          : error.code === "MISSING_DEPENDENCY"
+            ? { message: error.message }
+            : {};
+        return errorResponse(status, error.code, details);
       }
       return errorResponse(500, "IMPORT_FAILED");
     }

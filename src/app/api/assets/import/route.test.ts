@@ -57,4 +57,11 @@ describe("POST /api/assets/import", () => {
     expect(response.status).toBe(422);
     expect(await response.json()).toMatchObject({ code: "AMBIGUOUS_PRIMARY_MODEL", candidates: ["a.glb", "b.glb"] });
   });
+
+  it("returns the named missing dependency for actionable recovery", async () => {
+    const handler = createImportHandler({ getSession: async () => ({ user: { id: "owner" } }), importAsset: vi.fn(async () => { throw new AssetImportError("MISSING_DEPENDENCY", "OBJ model references missing MTL file: model.mtl"); }) });
+    const response = await handler(request([{ name: "model.obj", bytes: new TextEncoder().encode("v 0 0 0\n") }]));
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({ code: "MISSING_DEPENDENCY", message: "OBJ model references missing MTL file: model.mtl" });
+  });
 });

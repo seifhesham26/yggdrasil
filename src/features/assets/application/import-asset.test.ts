@@ -57,6 +57,25 @@ function fakes() {
 }
 
 describe("createImportAsset", () => {
+  it("stores an OBJ source beside a normalized GLB and analyzes the normalized file", async () => {
+    const deps = fakes();
+    const obj: ImportFile = { relativePath: "folder/triangle.obj", bytes: new TextEncoder().encode("v 0 0 0\n") };
+    deps.buildManifest.mockResolvedValueOnce({ primaryModel: obj, dependencies: [], attributionFiles: [], thumbnails: [], warnings: [] });
+    deps.analyze.mockImplementationOnce(async (_storage, key) => {
+      expect(key).toBe("staging/import-1/__normalized/folder/triangle.glb");
+      return analysis;
+    });
+    const convert = vi.fn(async () => ({ bytes: new Uint8Array([0x67, 0x6c, 0x54, 0x46]), warnings: [{ code: "FBX_FIDELITY_LIMITS", message: "warning" }] }));
+    const importAsset = createImportAsset({ ...deps, convert, createId: () => "import-1" });
+    await importAsset({ ownerId: "owner-1", name: "Triangle", entries: [obj] });
+    expect(convert).toHaveBeenCalledWith(expect.objectContaining({ format: "obj", relativePath: "folder/triangle.obj" }));
+    expect(deps.events).toContain("put:staging/import-1/__normalized/folder/triangle.glb");
+    expect(deps.getComplete()?.files).toEqual(expect.arrayContaining([
+      expect.objectContaining({ relativePath: "folder/triangle.obj", role: "source" }),
+      expect.objectContaining({ relativePath: "__normalized/folder/triangle.glb", role: "model" }),
+    ]));
+  });
+
   it("stages sources, analyzes, commits, and persists all file hashes and sizes", async () => {
     const deps = fakes();
     const originalModel = new Uint8Array(model.bytes);

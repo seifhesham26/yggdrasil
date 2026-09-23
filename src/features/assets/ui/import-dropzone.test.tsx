@@ -21,6 +21,12 @@ describe("ImportDropzone", () => {
     expect(await screen.findByText("Import complete")).toBeVisible();
   });
 
+  it("offers FBX and OBJ packages in the model picker", () => {
+    render(<ImportDropzone upload={vi.fn()} />);
+    expect(screen.getByLabelText("Choose model files")).toHaveAttribute("accept", expect.stringContaining(".fbx"));
+    expect(screen.getByLabelText("Choose model files")).toHaveAttribute("accept", expect.stringContaining(".obj"));
+  });
+
   it("does not submit an empty selection", async () => {
     const upload = vi.fn();
     render(<ImportDropzone upload={upload} />);

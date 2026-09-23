@@ -15,6 +15,7 @@ const errorMessages: Record<string, string> = {
   INVALID_ARCHIVE: "The ZIP could not be read safely. Check the archive and try again.",
   ARCHIVE_LIMIT_EXCEEDED: "This archive is too large or expands too much. Split it into smaller packages.",
   INVALID_FILE: "A file does not match its type or the model is invalid. Check the source package.",
+  MISSING_DEPENDENCY: "A model dependency is missing. Check the named MTL or texture file and try again.",
   UNSUPPORTED_FILE: "This package contains an unsupported file. Keep only model files, textures, binaries, and license text.",
   IMPORT_FAILED: "The import could not be saved. Check your database connection and try again.",
 };
@@ -72,7 +73,8 @@ export function ImportDropzone({ upload = uploadToApi }: { upload?: Upload }) {
       router.refresh();
     } catch (reason) {
       const code = reason && typeof reason === "object" && "code" in reason ? String(reason.code) : "IMPORT_FAILED";
-      setError(errorMessages[code] ?? errorMessages.IMPORT_FAILED);
+      const detail = reason && typeof reason === "object" && "message" in reason && typeof reason.message === "string" ? reason.message : null;
+      setError(code === "MISSING_DEPENDENCY" && detail ? detail : errorMessages[code] ?? errorMessages.IMPORT_FAILED);
       setPhase("error");
     }
   }
@@ -101,7 +103,7 @@ export function ImportDropzone({ upload = uploadToApi }: { upload?: Upload }) {
         <label className="file-choice">
           <Layers3 size={19} aria-hidden="true" />
           <span>Choose model files</span>
-          <input ref={filesInput} type="file" multiple accept=".gltf,.glb,.bin,.png,.jpg,.jpeg,.webp,.ktx2,.txt,.md" disabled={phase === "uploading"} onChange={(event) => select(Array.from(event.target.files ?? []))} />
+          <input ref={filesInput} type="file" multiple accept=".gltf,.glb,.fbx,.obj,.mtl,.bin,.png,.jpg,.jpeg,.webp,.ktx2,.txt,.md" disabled={phase === "uploading"} onChange={(event) => select(Array.from(event.target.files ?? []))} />
         </label>
         <label className="file-choice">
           <FolderOpen size={19} aria-hidden="true" />

@@ -9,7 +9,7 @@ export type StoredAssetFile = {
   byteSize: number;
   sha256: string;
   mimeType: string;
-  role: "model" | "dependency" | "attribution";
+  role: "model" | "source" | "dependency" | "attribution";
 };
 
 export type CreateImportRecord = { ownerId: string; name: string };

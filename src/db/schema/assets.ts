@@ -3,7 +3,7 @@ import { user } from "./auth";
 import type { AssetAnalysis } from "@/features/assets/domain/types";
 
 export const assetStatus = pgEnum("asset_status", ["importing", "ready", "failed"]);
-export const assetFileRole = pgEnum("asset_file_role", ["model", "dependency", "attribution"]);
+export const assetFileRole = pgEnum("asset_file_role", ["model", "source", "dependency", "attribution"]);
 export const assetVersionKind = pgEnum("asset_version_kind", ["original", "optimized", "converted"]);
 
 export const assets = pgTable("assets", {
