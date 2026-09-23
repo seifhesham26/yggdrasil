@@ -15,6 +15,13 @@
       "when": 1790165308211,
       "tag": "0001_unique_captain_marvel",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790194211423,
+      "tag": "0002_asset_source_byte_size_default",
+      "breakpoints": true
     }
   ]
 }

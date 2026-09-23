@@ -23,6 +23,8 @@ blob-report/
 data/
 yggdrasil-data/
 exports/
+private-fixtures/
+Mega.Wyvern/
 
 # Tool caches and scratch work
 *.tsbuildinfo

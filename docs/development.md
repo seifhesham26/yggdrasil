@@ -1,0 +1,33 @@
+# Local development
+
+Yggdrasil runs locally from `C:\dev\yggdrasil`. The toolchain verified for this milestone is Node.js **24.20.0** and pnpm **12.5.1** (`node --version`, `pnpm --version`). Install the locked dependencies with `pnpm install --frozen-lockfile`.
+
+## Configure Neon and local storage
+
+1. Create a Neon PostgreSQL project and copy its connection string. Neon must be reachable while using Yggdrasil; binary model files stay on your computer.
+2. If `.env` does not exist, copy `.env.example` to `.env`. Set `DATABASE_URL` to the Neon connection string. Never paste that URL into a commit, issue, or screenshot.
+3. Generate at least 32 random bytes for `BETTER_AUTH_SECRET`. In PowerShell: `[Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))`. Put the resulting value in `.env` once. If the file contains duplicate `BETTER_AUTH_SECRET` lines, remove the duplicate and keep the intended secret; changing it later invalidates existing sessions.
+4. Set `BETTER_AUTH_URL=http://localhost:3000`, `YGGDRASIL_OWNER_EMAIL` to your own email, and `YGGDRASIL_ASSET_ROOT` to an absolute local directory such as `C:\dev\yggdrasil-data`. The owner email is the only address allowed to register. Keep the storage directory outside the repository when possible.
+5. Run `pnpm db:migrate` to apply the Drizzle schema. Then run `pnpm dev` and open `http://localhost:3000/sign-in`. With an empty owner table, use **Create owner account** with the configured email. Alternatively, run `pnpm auth:create-owner` in an interactive terminal and enter a password of at least 12 characters. Once an owner exists, public registration is closed.
+
+The import flow currently accepts GLTF/GLB, their supported dependencies, and ZIP packages. FBX/OBJ conversion and the rest of the editing workflow are planned in [the roadmap](roadmap/README.md), not present in this milestone.
+
+## Verification
+
+Run `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm test:e2e`, and `pnpm build`. The ordinary Playwright run checks the public entry page; the import test skips unless an E2E database mode is explicitly selected.
+
+For a full browser import check, prefer a separate **empty** Neon database and set `YGGDRASIL_E2E_DATABASE_URL` in the environment. The test creates a temporary owner and asset folder and removes those test records afterward. Do not point this variable at a database containing real users or assets.
+
+If you deliberately use the configured main database, first confirm it contains **no users or assets**, then run in PowerShell:
+
+```powershell
+$env:YGGDRASIL_E2E_USE_MAIN_DATABASE = '1'
+pnpm test:e2e -- e2e/import-flow.spec.ts
+Remove-Item Env:YGGDRASIL_E2E_USE_MAIN_DATABASE
+```
+
+The test independently checks the empty-database precondition before registering its throwaway owner. It rejects a nonempty database and removes only that run's uniquely named owner (and its cascading assets) plus its validated temporary asset folder. An abrupt process kill may leave test records; inspect them before any manual cleanup. Never run this test against a populated production database.
+
+To check the private Mega Wyvern asset without copying it into the repository, set `YGGDRASIL_PRIVATE_FIXTURE_DIR` to the directory containing `f8caf90ad5da4017b0dddfe880cf37cc_Textured.gltf` and run `pnpm test -- src/features/assets/infrastructure/gltf-analyzer.test.ts`. The expected inventory is 78 nodes, one skinned mesh, and 11 animations; the supplied file has **zero cameras**. Keep the private model local unless its redistribution license explicitly permits sharing.
+
+Never commit `.env`, `.env.local`, Neon credentials, owner passwords, imported assets, private fixtures, or generated export packages. `.env.example` is intentionally tracked as a placeholder-only template.
