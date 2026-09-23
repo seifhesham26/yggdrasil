@@ -1,4 +1,9 @@
+import { existsSync } from "node:fs";
+import { loadEnvFile } from "node:process";
 import { defineConfig } from "drizzle-kit";
+
+// Drizzle Kit runs outside Next.js, so it must load the local .env itself.
+if (existsSync(".env")) loadEnvFile(".env");
 
 export default defineConfig({
   schema: "./src/db/schema/index.ts",

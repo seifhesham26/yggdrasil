@@ -19,7 +19,7 @@ async function fixture() {
   const bytes = new Uint8Array([0x67, 0x6c, 0x54, 0x46, 2, 0, 0, 0]);
   await storage.put(key, bytes);
   const asset: AssetDetail = {
-    id: "asset-1", ownerId: "owner", name: "Hero", status: "ready", errorCode: null, createdAt: new Date(), analysis: null,
+    id: "asset-1", ownerId: "owner", name: "Hero", status: "ready", errorCode: null, createdAt: new Date(), updatedAt: new Date(), byteSize: bytes.length, format: "GLB", counts: null, analysis: null,
     files: [{ relativePath: "hero.glb", storageKey: key, byteSize: bytes.length, sha256: "hash", mimeType: "model/gltf-binary", role: "model" }],
   };
   return { storage, key, bytes, asset };

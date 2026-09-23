@@ -119,7 +119,8 @@ describe("createImportAsset", () => {
     deps.repository.completeImport = async () => { throw new Error("response lost"); };
     deps.repository.getAsset = async () => ({
       id: assetId, ownerId: "owner-1", name: "Triangle", status: "ready", errorCode: null,
-      createdAt: new Date(), files: [], analysis,
+      createdAt: new Date(), updatedAt: new Date(), byteSize: model.bytes.length + binary.bytes.length,
+      format: "glTF", counts: { meshes: 1, triangles: 1, animations: 1 }, files: [], analysis,
     });
     const importAsset = createImportAsset({ ...deps, createId: () => "import-1" });
     await expect(importAsset({ ownerId: "owner-1", name: "Triangle", entries: [model, binary] })).resolves.toMatchObject({ assetId, analysis });

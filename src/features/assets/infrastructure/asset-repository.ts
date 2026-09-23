@@ -25,6 +25,10 @@ export type AssetSummary = {
   name: string;
   status: "importing" | "ready" | "failed";
   createdAt: Date;
+  updatedAt: Date;
+  byteSize: number | null;
+  format: "GLB" | "glTF" | null;
+  counts: Pick<AssetAnalysis["counts"], "meshes" | "triangles" | "animations"> | null;
 };
 export type AssetDetail = AssetSummary & {
   ownerId: string;
@@ -76,17 +80,38 @@ export class DrizzleAssetRepository implements AssetRepository {
   async getAsset(assetId: string, ownerId: string): Promise<AssetDetail | null> {
     const [asset] = await db.select().from(assets).where(and(eq(assets.id, assetId), eq(assets.ownerId, ownerId))).limit(1);
     if (!asset) return null;
-    const [source] = await db.select({ id: assetSources.id }).from(assetSources).where(eq(assetSources.assetId, assetId)).limit(1);
+    const [source] = await db.select({ id: assetSources.id, byteSize: assetSources.byteSize }).from(assetSources).where(eq(assetSources.assetId, assetId)).limit(1);
     const files = source ? await db.select({
       relativePath: assetFiles.relativePath, storageKey: assetFiles.storageKey, byteSize: assetFiles.byteSize,
       sha256: assetFiles.sha256, mimeType: assetFiles.mimeType, role: assetFiles.role,
     }).from(assetFiles).where(eq(assetFiles.sourceId, source.id)) : [];
     const [snapshot] = await db.select({ analysis: sceneAnalyses.snapshot }).from(sceneAnalyses).where(eq(sceneAnalyses.assetId, assetId)).orderBy(desc(sceneAnalyses.createdAt)).limit(1);
-    return { id: asset.id, ownerId: asset.ownerId, name: asset.name, status: asset.status, errorCode: asset.errorCode, createdAt: asset.createdAt, files, analysis: snapshot?.analysis ?? null };
+    const primary = files.find((file) => file.role === "model");
+    const analysis = snapshot?.analysis ?? null;
+    return {
+      id: asset.id, ownerId: asset.ownerId, name: asset.name, status: asset.status, errorCode: asset.errorCode,
+      createdAt: asset.createdAt, updatedAt: asset.updatedAt, byteSize: source?.byteSize ?? null,
+      format: primary?.mimeType === "model/gltf-binary" ? "GLB" : primary ? "glTF" : null,
+      counts: analysis ? { meshes: analysis.counts.meshes, triangles: analysis.counts.triangles, animations: analysis.counts.animations } : null,
+      files, analysis,
+    };
   }
 
   async listAssets(ownerId: string): Promise<AssetSummary[]> {
-    return db.select({ id: assets.id, name: assets.name, status: assets.status, createdAt: assets.createdAt })
-      .from(assets).where(eq(assets.ownerId, ownerId)).orderBy(desc(assets.createdAt));
+    const rows = await db.select({
+      id: assets.id, name: assets.name, status: assets.status, createdAt: assets.createdAt, updatedAt: assets.updatedAt,
+      byteSize: assetSources.byteSize, mimeType: assetFiles.mimeType, analysis: sceneAnalyses.snapshot,
+    }).from(assets)
+      .leftJoin(assetSources, eq(assetSources.assetId, assets.id))
+      .leftJoin(assetFiles, and(eq(assetFiles.sourceId, assetSources.id), eq(assetFiles.role, "model")))
+      .leftJoin(assetVersions, and(eq(assetVersions.assetId, assets.id), eq(assetVersions.kind, "original")))
+      .leftJoin(sceneAnalyses, eq(sceneAnalyses.versionId, assetVersions.id))
+      .where(eq(assets.ownerId, ownerId))
+      .orderBy(desc(assets.createdAt));
+    return rows.map((row) => ({
+      id: row.id, name: row.name, status: row.status, createdAt: row.createdAt, updatedAt: row.updatedAt,
+      byteSize: row.byteSize, format: row.mimeType === "model/gltf-binary" ? "GLB" as const : row.mimeType ? "glTF" as const : null,
+      counts: row.analysis ? { meshes: row.analysis.counts.meshes, triangles: row.analysis.counts.triangles, animations: row.analysis.counts.animations } : null,
+    }));
   }
 }
