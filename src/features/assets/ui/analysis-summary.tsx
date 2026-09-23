@@ -7,6 +7,8 @@ export function AnalysisSummary({ analysis }: { analysis: AssetAnalysis }) {
     ["Meshes", analysis.counts.meshes],
     ["Triangles", analysis.counts.triangles],
     ["Materials", analysis.counts.materials],
+    ["Textures", analysis.counts.textures],
+    ["Skins", analysis.counts.skins],
     ["Animations", analysis.counts.animations],
   ] as const;
   return (
