@@ -1,8 +1,8 @@
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 
-import { serverEnv } from "@/lib/env/server";
-import * as schema from "@/db/schema";
+import { serverEnv } from "../lib/env/server";
+import * as schema from "./schema";
 
 type Database = ReturnType<typeof createDatabase>;
 
