@@ -28,6 +28,8 @@ exports/
 *.tsbuildinfo
 next-env.d.ts
 .superpowers/
+graphify-out/
+.codex/hooks.json
 work/
 .worktrees/
 
