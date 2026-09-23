@@ -26,7 +26,7 @@ export default async function AssetPage({ params }: { params: Promise<{ assetId:
           {asset.status === "ready" && url && primary ? <ModelCanvasLoader modelUrl={url} primaryRelativePath={primary.relativePath} files={asset.files.map((file) => ({ relativePath: file.relativePath, storageKey: file.storageKey }))} /> : <div className="asset-preview-unavailable"><Box size={34} aria-hidden="true" /><h2>Preview not ready</h2><p>{asset.status === "failed" ? "This import did not complete. Return to the library and try the source package again." : "The model is still being prepared."}</p></div>}
         </section>
         <aside className="asset-report-panel">
-          {asset.analysis ? <AnalysisSummary analysis={asset.analysis} /> : <div className="report-placeholder"><Info size={24} aria-hidden="true" /><h2>Analysis pending</h2><p>Technical details appear here after a successful import.</p></div>}
+          {asset.analysis ? <AnalysisSummary analysis={asset.analysis} byteSize={asset.byteSize ?? 0} /> : <div className="report-placeholder"><Info size={24} aria-hidden="true" /><h2>Analysis pending</h2><p>Technical details appear here after a successful import.</p></div>}
         </aside>
       </div>
       <div className="asset-detail-lower">

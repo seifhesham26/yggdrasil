@@ -1,6 +1,6 @@
 # Task 2.1 — Findings and recommendations
 
-**Status:** [ ] Planned. **Depends on:** Phase 1.
+**Status:** In progress. **Depends on:** Phase 1.
 
 **Outcome:** Analysis produces specific, explainable optimization suggestions rather than a single opaque score.
 
@@ -8,9 +8,9 @@
 
 **Acceptance:**
 
-- [ ] Fixture tests produce stable findings and no duplicate/conflicting recommendations.
-- [ ] A model requiring no change gets an explicit “no recommendations” state.
-- [ ] Unsupported compression/material cases show a warning, not an unsafe action button.
-- [ ] Only the authenticated owner can request and view private findings.
+- [x] Fixture tests produce stable findings and no duplicate/conflicting recommendations.
+- [x] A model requiring no change gets an explicit “no recommendations” state.
+- [x] Unsupported compression/material cases show a warning, not an unsafe action button.
+- [x] Only the authenticated owner can request and view private findings.
 
 **Likely touchpoints:** `gltf-analyzer.ts`, asset domain types, Drizzle finding records, asset detail UI. **Evidence to record:** fixture metrics and rule thresholds.

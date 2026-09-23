@@ -69,7 +69,7 @@ export class DrizzleAssetRepository implements AssetRepository {
         byteSize: primary.byteSize, sha256: primary.sha256, mimeType: primary.mimeType,
       }).returning({ id: assetVersions.id });
       await tx.insert(sceneAnalyses).values({ assetId: input.assetId, versionId: version.id, snapshot: input.analysis });
-      await tx.update(assets).set({ status: "ready", errorCode: null, updatedAt: new Date() }).where(and(eq(assets.id, input.assetId), eq(assets.ownerId, input.ownerId)));
+      await tx.update(assets).set({ status: "ready", errorCode: null, currentVersionId: version.id, updatedAt: new Date() }).where(and(eq(assets.id, input.assetId), eq(assets.ownerId, input.ownerId)));
     });
   }
 

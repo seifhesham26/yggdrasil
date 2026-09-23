@@ -1,10 +1,11 @@
-import { bigint, index, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { bigint, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { user } from "./auth";
 import type { AssetAnalysis } from "@/features/assets/domain/types";
 
 export const assetStatus = pgEnum("asset_status", ["importing", "ready", "failed"]);
 export const assetFileRole = pgEnum("asset_file_role", ["model", "source", "dependency", "attribution"]);
 export const assetVersionKind = pgEnum("asset_version_kind", ["original", "optimized", "converted"]);
+export const optimizationOperationStatus = pgEnum("optimization_operation_status", ["approved", "running", "succeeded", "failed", "canceled"]);
 
 export const assets = pgTable("assets", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -14,6 +15,7 @@ export const assets = pgTable("assets", {
   errorCode: text("error_code"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  currentVersionId: uuid("current_version_id"),
 }, (table) => [index("assets_owner_created_idx").on(table.ownerId, table.createdAt)]);
 
 export const assetSources = pgTable("asset_sources", {
@@ -48,8 +50,33 @@ export const assetVersions = pgTable("asset_versions", {
   byteSize: bigint("byte_size", { mode: "number" }).notNull(),
   sha256: text("sha256").notNull(),
   mimeType: text("mime_type").notNull(),
+  parentVersionId: uuid("parent_version_id"),
+  operationId: uuid("operation_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [uniqueIndex("asset_versions_storage_key_uq").on(table.storageKey), index("asset_versions_asset_idx").on(table.assetId)]);
+
+export const optimizationFindings = pgTable("optimization_findings", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  assetId: uuid("asset_id").notNull().references(() => assets.id, { onDelete: "cascade" }),
+  code: text("code").notNull(),
+  snapshot: jsonb("snapshot").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [index("optimization_findings_asset_idx").on(table.assetId)]);
+
+export const optimizationOperations = pgTable("optimization_operations", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  assetId: uuid("asset_id").notNull().references(() => assets.id, { onDelete: "cascade" }),
+  parentVersionId: uuid("parent_version_id").notNull().references(() => assetVersions.id, { onDelete: "restrict" }),
+  operation: text("operation").notNull(),
+  parameters: jsonb("parameters").notNull(),
+  status: optimizationOperationStatus("status").notNull(),
+  errorMessage: text("error_message"),
+  warnings: jsonb("warnings").notNull().default([]),
+  inputBytes: integer("input_bytes"),
+  outputBytes: integer("output_bytes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+}, (table) => [index("optimization_operations_asset_idx").on(table.assetId, table.createdAt)]);
 
 export const sceneAnalyses = pgTable("scene_analyses", {
   id: uuid("id").defaultRandom().primaryKey(),

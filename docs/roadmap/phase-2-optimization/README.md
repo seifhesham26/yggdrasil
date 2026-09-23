@@ -1,6 +1,6 @@
 # Phase 2 — Reversible optimization
 
-**Status:** Planned. **Depends on:** Phase 1 accepted.
+**Status:** In progress. **Depends on:** Phase 1 accepted (Phase 1 remains planned; this work is fixture- and schema-only until that gate is accepted).
 
 Goal: explain web-performance risks and offer owner-approved, non-destructive improvements. No optimization runs automatically on import.
 
