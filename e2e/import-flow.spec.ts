@@ -91,6 +91,17 @@ test("owner imports models, reopens previews, and completes optimization workflo
   const preview = page.getByRole("region", { name: "Model preview", exact: true });
   await expect(preview).toHaveAttribute("data-version-id", original.id);
   await expect(page.getByText(/Quality risk: low/)).toBeVisible();
+  const compressedResponse = await page.request.post(endpoint, { data: { operation: "compress-geometry", approve: true, settings: { keepExtras: true, meshoptLevel: "medium" } } });
+  expect(compressedResponse.status(), await compressedResponse.text()).toBe(200);
+  const compressed = await compressedResponse.json();
+  expect(compressed.operation).toBe("compress-geometry");
+  expect((await page.request.get("/api/assets/" + assetId + "/file?key=" + encodeURIComponent(compressed.storageKey))).status()).toBe(200);
+  await page.reload();
+  await expect(preview).toHaveAttribute("data-version-id", compressed.id);
+  await expect(preview.getByRole("img", { name: "3D model preview" })).toBeVisible();
+  await page.request.patch(endpoint, { data: { action: "revert", versionId: original.id } });
+  await page.reload();
+  await expect(preview).toHaveAttribute("data-version-id", original.id);
   const appliedResponse = page.waitForResponse((candidate) => candidate.url().endsWith(endpoint) && candidate.request().method() === "POST");
   await page.getByRole("button", { name: "Approve normalization" }).click();
   const applied = await appliedResponse;
@@ -125,7 +136,7 @@ test("owner imports models, reopens previews, and completes optimization workflo
   }
   const afterFailure = await (await page.request.get(`${endpoint}?view=history`)).json();
   expect(afterFailure.currentVersionId).toBe(derived.id);
-  expect(afterFailure.versions).toHaveLength(2);
+  expect(afterFailure.versions).toHaveLength(3);
   const failedAttempt = afterFailure.attempts.at(-1);
   expect(failedAttempt).toMatchObject({ status: "failed", parentVersionId: derived.id });
 
@@ -134,7 +145,7 @@ test("owner imports models, reopens previews, and completes optimization workflo
   await expect(preview).toHaveAttribute("data-version-id", original.id);
   await page.reload();
   await expect(preview).toHaveAttribute("data-version-id", original.id);
-  await expect(versions.getByRole("listitem")).toHaveCount(2);
+  await expect(versions.getByRole("listitem")).toHaveCount(3);
   const retryResponse = page.waitForResponse((candidate) => candidate.url().endsWith(endpoint) && candidate.request().method() === "POST");
   await page.getByRole("button", { name: "Retry last failed operation" }).click();
   const retry = await retryResponse;
@@ -144,7 +155,7 @@ test("owner imports models, reopens previews, and completes optimization workflo
   await expect(preview).toHaveAttribute("data-version-id", retried.id);
   await page.reload();
   await expect(preview).toHaveAttribute("data-version-id", retried.id);
-  await expect(versions.getByRole("listitem")).toHaveCount(3);
+  await expect(versions.getByRole("listitem")).toHaveCount(4);
   const finalHistory = await (await page.request.get(`${endpoint}?view=history`)).json();
   expect(finalHistory.attempts.at(-1)).toMatchObject({ retryOf: failedAttempt.id, versionId: retried.id, status: "succeeded" });
   expect(await (await page.request.get(sourceURL)).body()).toEqual(sourceBefore);

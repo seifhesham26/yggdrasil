@@ -48,6 +48,8 @@ describe("protected optimization mutations", () => {
     const handler = createOptimizationMutationHandler({ getSession: async () => ({ user: { id: "owner-1" } }), getHistory: async (assetId, ownerId) => assetId === "asset-1" && ownerId === "owner-1" ? history : null });
     const applied = await handler("asset-1", new Request("http://localhost", { method: "POST", body: JSON.stringify({ operation: "normalize", approve: true }) }));
     expect(applied.status).toBe(200); expect(history.apply).toHaveBeenCalledWith({ ownerId: "owner-1", assetId: "asset-1", operation: "normalize", approve: true });
+    const compressed = await handler("asset-1", new Request("http://localhost", { method: "POST", body: JSON.stringify({ operation: "compress-geometry", approve: true, settings: { keepExtras: true, meshoptLevel: "medium" } }) }));
+    expect(compressed.status).toBe(200); expect(history.apply).toHaveBeenCalledWith({ ownerId: "owner-1", assetId: "asset-1", operation: "compress-geometry", approve: true, settings: { keepExtras: true, meshoptLevel: "medium" } });
     const compared = await handler("asset-1", new Request("http://localhost", { method: "GET" }));
     expect(compared.status).toBe(200);
     const reverted = await handler("asset-1", new Request("http://localhost", { method: "PATCH", body: JSON.stringify({ action: "revert", versionId: "v1" }) }));

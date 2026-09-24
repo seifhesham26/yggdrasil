@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { ModelCanvasLoader } from "@/features/viewer/model-canvas-loader";
 import type { ViewerFile } from "@/features/viewer/model-canvas";
 import type { OptimizationReport } from "../domain/optimization";
-import type { OptimizationVersion, OptimizationAttempt } from "../application/reversible-optimization";
+import type { OptimizationOperation } from "../domain/optimization";
+import type { OptimizationSettings, OptimizationVersion, OptimizationAttempt } from "../application/reversible-optimization";
 
 type History = { versions: OptimizationVersion[]; attempts: OptimizationAttempt[]; currentVersionId?: string; report: OptimizationReport };
 
@@ -19,6 +20,7 @@ export function OptimizationControls({ assetId, sourceFiles = [] }: { assetId: s
   const router = useRouter();
   const [history, setHistory] = useState<History | null>(null);
   const [compareId, setCompareId] = useState("");
+  const [selectedOperation, setSelectedOperation] = useState<OptimizationOperation>("normalize");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const endpoint = `/api/assets/${assetId}/optimization`;
@@ -56,7 +58,14 @@ export function OptimizationControls({ assetId, sourceFiles = [] }: { assetId: s
 
   const current = history?.versions.find((version) => version.id === history.currentVersionId);
   const compare = history?.versions.find((version) => version.id === compareId);
-  const recommendation = history?.report.findings.find((finding) => finding.operation === "normalize");
+  const recommendations = history?.report.findings.filter((finding) => finding.supported) ?? [];
+  const recommendation = history?.report.findings.find((finding) => finding.operation === selectedOperation);
+  const operationSettings: OptimizationSettings = selectedOperation === "resize-textures"
+    ? { keepExtras: true, maxTextureSize: 2048, targetFormat: "png" }
+    : selectedOperation === "compress-geometry"
+      ? { keepExtras: true, meshoptLevel: "medium" }
+      : selectedOperation === "lower-detail" ? { keepExtras: true, detailRatio: 0.5, detailError: 0.01 } : { keepExtras: true };
+  const operationLabel = selectedOperation === "normalize" ? "normalization" : selectedOperation.replaceAll("-", " ");
   const failed = history?.attempts.filter((attempt) => attempt.status === "failed").findLast((attempt) => !history.attempts.some((retry) => retry.retryOf === attempt.id && retry.status === "succeeded"));
   const compareFile = compare?.operation === "original" ? sourceFiles.find((file) => file.storageKey === compare.storageKey) : compare ? { relativePath: compare.operation === "variant" && compare.storageKey.endsWith(".gltf") ? compare.storageKey.split("/variants/").at(-1)?.split("/").slice(1).join("/") ?? "model.gltf" : "model.glb", storageKey: compare.storageKey } : undefined;
   const metrics = current && compare ? [
@@ -74,8 +83,13 @@ export function OptimizationControls({ assetId, sourceFiles = [] }: { assetId: s
       <p>{recommendation.evidence} Quality risk: {recommendation.qualityRisk}. Estimated savings: {recommendation.estimatedGain.percent ?? 0}% (not measured).</p>
       {recommendation.warning ? <p>{recommendation.warning}</p> : null}
       <p>Approving creates and selects a new version. Review the resulting preview before using it.</p>
-    </div> : <p>{history ? "No compatible normalization is available for this version." : "Loading compatibility and history…"}</p>}
-    <button type="button" onClick={() => mutate("POST", { operation: "normalize", approve: true }, "Optimization applied as a new version.")} disabled={busy || !recommendation?.supported}>Approve normalization</button>
+    </div> : <p>{history ? "No compatible optimization is available for this version." : "Loading compatibility and history…"}</p>}
+    {history && recommendations.length ? <label>Operation
+      <select aria-label="Optimization operation" value={selectedOperation} onChange={(event) => setSelectedOperation(event.target.value as OptimizationOperation)}>
+        {recommendations.map((finding) => <option key={finding.operation} value={finding.operation}>{finding.operation.replaceAll("-", " ")}</option>)}
+      </select>
+    </label> : null}
+    <button type="button" onClick={() => mutate("POST", { operation: selectedOperation, approve: true, settings: operationSettings }, `Applied ${operationLabel} as a new version.`)} disabled={busy || !recommendation?.supported}>Approve {operationLabel}</button>
     {message ? <p role="status">{message}</p> : null}
     {failed ? <button type="button" onClick={() => mutate("POST", { action: "retry" }, "Retry completed.")} disabled={busy}>Retry last failed operation</button> : null}
     {history ? <>

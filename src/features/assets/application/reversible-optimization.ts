@@ -17,7 +17,15 @@ export type OptimizationVersion = {
   operation: OptimizationOperation | "original" | "variant";
   createdAt: Date;
 };
-export type OptimizationSettings = { keepExtras: boolean };
+export type OptimizationSettings = {
+  keepExtras: boolean;
+  maxTextureSize?: number;
+  targetFormat?: "jpeg" | "png" | "webp" | "avif";
+  quality?: number;
+  meshoptLevel?: "medium" | "high";
+  detailRatio?: number;
+  detailError?: number;
+};
 export type OptimizationAttempt = { id: string; ownerId: string; assetId: string; versionId: string; parentVersionId: string; operation: OptimizationOperation; settings: OptimizationSettings; retryOf?: string; status: "succeeded" | "failed"; error?: string; createdAt: Date };
 
 export type OptimizationPersistenceSnapshot = {

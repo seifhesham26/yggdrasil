@@ -18,7 +18,7 @@ describe("buildOptimizationReport", () => {
   it("is stable, specific, and deduplicated", () => {
     const report = buildOptimizationReport({ ...clean, counts: { ...clean.counts, triangles: 300_000 }, warnings: [{ code: "HIGH_TRIANGLE_COUNT", severity: "warning", message: "large" }] }, 1000);
     expect(report.state).toBe("recommendations");
-    expect(report.findings.map((item) => item.id)).toEqual(["expensive-geometry:lower-detail", "safe-normalization:normalize"]);
+    expect(report.findings.map((item) => item.id)).toEqual(["expensive-geometry:lower-detail", "expensive-geometry:compress-geometry", "safe-normalization:normalize"]);
     expect(new Set(report.findings.map((item) => item.id)).size).toBe(report.findings.length);
     expect(report.findings.every((item) => item.estimatedGain.label === "estimate")).toBe(true);
   });
@@ -32,6 +32,14 @@ describe("buildOptimizationReport", () => {
 
   it("warns instead of enabling unsupported texture work", () => {
     const report = buildOptimizationReport({ ...clean, counts: { ...clean.counts, textures: 1 }, warnings: [{ code: "LARGE_TEXTURE", severity: "warning", message: "large" }] }, 1000);
-    expect(report.findings.find((item) => item.kind === "oversized-texture")).toMatchObject({ supported: false, warning: expect.any(String) });
+    expect(report.findings.find((item) => item.kind === "oversized-texture")).toMatchObject({ supported: true, operation: "resize-textures" });
+  });
+
+  it("offers compatible geometry compression and lower-detail operations", () => {
+    const report = buildOptimizationReport({ ...clean, counts: { ...clean.counts, triangles: 300_000 }, warnings: [{ code: "HIGH_TRIANGLE_COUNT", severity: "warning", message: "large" }] }, 1000);
+    expect(report.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ operation: "compress-geometry", supported: true }),
+      expect.objectContaining({ operation: "lower-detail", supported: true }),
+    ]));
   });
 });

@@ -5,6 +5,7 @@ import { useFrame } from "@react-three/fiber";
 import { useBounds } from "@react-three/drei";
 import { AnimationMixer, BufferGeometry, LoadingManager, Material, type Object3D, Texture } from "three";
 import { GLTFLoader, type GLTF } from "three/addons/loaders/GLTFLoader.js";
+import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 import { clone as cloneSkeleton } from "three/addons/utils/SkeletonUtils.js";
 import type { ViewerFile } from "./model-canvas";
 
@@ -83,6 +84,7 @@ export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, fra
     const manager = new LoadingManager();
     manager.setURLModifier((url) => modelResourceUrl(modelUrl, primaryRelativePath, files, url));
     const loader = new GLTFLoader(manager);
+    loader.setMeshoptDecoder(MeshoptDecoder);
     loader.load(modelUrl, (result) => {
       if (!active) { disposeLoadedScene(result.scene); return; }
       loaded = result;

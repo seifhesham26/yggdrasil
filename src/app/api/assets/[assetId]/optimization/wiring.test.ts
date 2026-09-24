@@ -80,7 +80,7 @@ it("rejects another asset's retained version, and returns persistence failure wi
 it("rejects unsupported inputs and forged version IDs without promotion", async () => {
   const { assetId, root, original } = await importedFixture(); context.root = root;
   const params = { params: Promise.resolve({ assetId }) };
-  expect((await POST(request(assetId, "POST", { operation: "compress-geometry", approve: true }), params)).status).toBe(422);
+  expect((await POST(request(assetId, "POST", { operation: "unsupported-operation", approve: true }), params)).status).toBe(422);
   expect((await PATCH(request(assetId, "PATCH", { action: "revert", versionId: randomUUID() }), params)).status).toBe(422);
   const history = await (await GET(request(assetId), params)).json();
   expect(history.currentVersionId).toBe(original.id);

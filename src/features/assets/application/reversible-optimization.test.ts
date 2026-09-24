@@ -82,7 +82,7 @@ describe("ReversibleOptimizationHistory", () => {
   it("keeps the previous version current and records a failed attempt", async () => {
     const { history } = await fixture();
     await expect(history.apply({ ownerId: "owner-2", assetId: "a", operation: "normalize", approve: true })).rejects.toThrow("owner");
-    await expect(history.apply({ ownerId: "owner-1", assetId: "a", operation: "compress-geometry", approve: true })).rejects.toThrow("Unsupported");
+    await expect(history.apply({ ownerId: "owner-1", assetId: "a", operation: "unsupported-operation" as never, approve: true })).rejects.toThrow("Unsupported");
     expect(history.currentVersion("owner-1", "a")?.id).toBe("original"); expect(history.attemptsFor("owner-1", "a")).toEqual(expect.arrayContaining([expect.objectContaining({ status: "failed" })]));
   });
 

@@ -19,11 +19,11 @@ This file turns the coordinator and subagent review findings into executable tas
 - [ ] Make a healthy nonempty model produce an explicit “no recommendations” result when no rule demonstrates a benefit.
 - [ ] Make findings identify actual affected resource IDs and add the missing or incorrect rules for unused resources, missing textures, oversized textures, and expensive geometry/draw calls.
 - [ ] Record processor/tool version plus explicit input and output hashes in every optimization operation and expose parameters, timestamps, warnings, and outcomes in history.
-- [ ] Implement and verify the named texture resize, geometry compression, and lower-detail operations, or revise the phase outcome and acceptance wording to the deliberately narrower supported contract.
+- [x] Implement and verify the named texture resize, geometry compression, and lower-detail operations, or revise the phase outcome and acceptance wording to the deliberately narrower supported contract.
 - [ ] Add a positive processor test proving that remove-unused actually removes an unused resource, not only that the output remains valid.
-- [ ] Verify the selected derived preview and visual revert/reopen flow in an authenticated browser session with an empty isolated PostgreSQL database.
-- [ ] Verify retained-version reopening after an external PostgreSQL process restart and record the exact migration/database evidence.
-- [ ] Run and record the complete Phase 2 quality suite before marking the phase accepted.
+- [x] Verify the selected derived preview and visual revert/reopen flow in an authenticated browser session with an empty isolated PostgreSQL database.
+- [x] Verify retained-version reopening after an external PostgreSQL process restart and record the exact migration/database evidence.
+- [x] Run and record the complete Phase 2 quality suite before marking the phase accepted.
 
 ## Phase 3 — visual authoring
 

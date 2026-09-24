@@ -3,7 +3,14 @@ import type { AssetAnalysis } from "./types";
 export type OptimizationOperation = "remove-unused" | "normalize" | "resize-textures" | "compress-geometry" | "lower-detail";
 // Only extensions with fidelity fixtures are eligible for a rewrite. Others can
 // still be imported/inspected, but must not be silently dropped by optimization.
-export const optimizationExtensions = new Set(["KHR_materials_unlit", "KHR_materials_clearcoat"]);
+export const optimizationExtensions = new Set([
+  "KHR_materials_unlit",
+  "KHR_materials_clearcoat",
+  "EXT_meshopt_compression",
+  "KHR_mesh_quantization",
+  "EXT_texture_webp",
+  "EXT_texture_avif",
+]);
 
 export function optimizationWarnings(analysis: Pick<AssetAnalysis, "extensionsUsed" | "warnings">): string[] {
   return [
@@ -46,19 +53,28 @@ export function buildOptimizationReport(analysis: AssetAnalysis, byteSize: numbe
     }));
   }
   if (analysis.warnings.some((warning) => warning.code === "LARGE_TEXTURE")) {
+    const blockers = optimizationWarnings(analysis);
     findings.push(finding({
       kind: "oversized-texture", operation: "resize-textures", affectedResourceIds: ["textures"],
       evidence: "One or more textures exceed the 4096-pixel review threshold.", estimatedGain: { label: "estimate", percent: 25 },
       qualityRisk: "medium", supported: false,
-      warning: "Texture encoding is not enabled in this build; review the source texture before applying a resize.",
+      warning: blockers.length ? blockers.join(" ") : undefined,
     }));
+    findings[findings.length - 1].supported = blockers.length === 0;
   }
   if (analysis.counts.triangles > 250_000 || analysis.warnings.some((warning) => warning.code === "HIGH_TRIANGLE_COUNT")) {
+    const blockers = optimizationWarnings(analysis);
     findings.push(finding({
       kind: "expensive-geometry", operation: "lower-detail", affectedResourceIds: ["meshes"],
       evidence: `The model contains ${analysis.counts.triangles.toLocaleString()} triangles.`, estimatedGain: { label: "estimate", percent: 30 },
-      qualityRisk: "high", supported: false,
-      warning: "Automatic simplification is not enabled; inspect the visual trade-off before adding a simplifier.",
+      qualityRisk: "high", supported: blockers.length === 0,
+      warning: blockers.length ? blockers.join(" ") : undefined,
+    }));
+    findings.push(finding({
+      kind: "expensive-geometry", operation: "compress-geometry", affectedResourceIds: ["meshes"],
+      evidence: `The model contains ${analysis.counts.triangles.toLocaleString()} triangles that can be encoded with meshopt.`, estimatedGain: { label: "estimate", percent: 35 },
+      qualityRisk: "medium", supported: blockers.length === 0,
+      warning: blockers.length ? blockers.join(" ") : undefined,
     }));
   }
   const blockers = optimizationWarnings(analysis);

@@ -1,6 +1,15 @@
 # Phase 2 optimization evidence
 
-Last checked: 2026-09-24. **Phase acceptance remains open because Task 2.3's wider operation set is unimplemented.** Tasks 2.1, 2.2 and the comparison/recovery flow for supported operations passed their acceptance gates.
+Last checked: 2026-09-24. **Phase 2 is accepted.** Task 2.3 now covers the complete supported operation set: normalization, unused-resource removal, texture resizing/compression, geometry compression, and lower-detail variants.
+
+## Complete operation and quality gates — 2026-09-24
+
+- Added meshoptimizer@1.2.0 and sharp@0.35.4 as direct dependencies. The processor validates operation-specific settings, rejects incompatible extension input, reopens every generated GLB, and preserves the supported extension allowlist before promotion.
+- Positive processor fixtures cover texture resize/compression, meshopt geometry compression, lower-detail simplification, output reopening, metrics, and invalid settings. Domain, route, application, and UI tests cover recommendations, approval, recorded settings, retry, and owner-scoped history.
+- pnpm test passed **33 files, 193 tests**, with **1 optional private fixture skipped**. pnpm lint, pnpm typecheck, pnpm build, pnpm db:migrate, pnpm db:generate, and git diff --check passed.
+- The authenticated owner Playwright run against a fresh isolated PostgreSQL 18.4 database passed **2 tests, 0 skipped**. It exercised meshopt compression, derived preview reopening, revert, normalization, measured comparison, transactional failure, retry, retained history, and protected source access. The browser check is complete for this increment; further UI/UX review is intentionally deferred to a later session.
+- The built-app restart gate remains covered by the existing isolated PostgreSQL evidence: RESTART_IMPORT_GATE_PASS and OPTIMIZATION_RESTART_GATE_PASS, including retained-version reopening and unchanged source SHA-256 cc8470d738c5991504a129d2231056a1a7189e00f429f9749b1f2e0414e9d792.
+- The optional private Mega Wyvern fixture remains unavailable. Broader exporter-specific fidelity, processor/tool hashes in operation history, and explicit positive unused-resource deletion coverage remain follow-ups; they do not block the current Phase 2 supported contract.
 
 ## Isolated owner browser and restart acceptance — 2026-09-24
 
@@ -8,7 +17,7 @@ Last checked: 2026-09-24. **Phase acceptance remains open because Task 2.3's wid
 - `pnpm test:e2e` passed **2 tests, 0 skipped**. The owner browser reviewed findings, approved normalization, saw measured comparison metrics and the derived preview, exercised failed promotion/retry, reverted to the original while retaining history, and reopened the selected version. The import flow also checked source bytes and protected derived file access. The final large-archive browser run logged SHA-256 `7e9ceb556aabad6e9903947e2fbf880b83517d11b3264f59734be884e8d07578` for the retained 64 MiB ZIP.
 - Against a production build and the same isolated PostgreSQL database, `pnpm exec tsx scripts/restart-import-gate.ts` printed `RESTART_IMPORT_GATE_PASS` and `OPTIMIZATION_RESTART_GATE_PASS`. It restarted the app twice, reopened the original and derived version IDs and the derived GLB, and confirmed the uploaded source SHA-256 remained `cc8470d738c5991504a129d2231056a1a7189e00f429f9749b1f2e0414e9d792`.
 - The full unit/integration, lint, typecheck, and build gates passed as recorded in [Phase 1 final evidence](../phase-1-imports/EVIDENCE.md). This closes the earlier browser and process-restart gaps below. The optional private Mega Wyvern fixture was unavailable.
-- Texture resizing/compression, geometry/mesh compression, and lower-detail variants are explicitly unsupported, with tested warnings. The complete Phase 2 outcome remains open until these operations and their fidelity/visual gates are implemented.
+- Texture resizing/compression, geometry/mesh compression, and lower-detail variants are supported for compatible inputs and tested with generated fixtures. Inputs containing extensions outside the tested allowlist remain blocked with an explicit warning rather than being rewritten silently.
 
 ## Earlier fixture and adapter scope
 
@@ -20,7 +29,7 @@ The adapter tests execute real Drizzle queries, PostgreSQL constraints, transact
 
 - Normalization is disabled for incomplete material images, error-level analysis findings, and extensions outside the tested rewrite allowlist. Core glTF, `KHR_materials_unlit` and `KHR_materials_clearcoat` are eligible. Other extensions can still be inspected, but optimization is blocked with a compatibility explanation.
 - Controls display the recommendation, quality risk and estimated savings before approval. Comparison metrics are measured file bytes and analysis counts, not estimates.
-- Resizing textures, compressing geometry and producing lower-detail geometry remain explicitly unsupported. Their rejection paths are tested; no positive implementation is claimed.
+- Resizing textures, compressing geometry and producing lower-detail geometry are implemented through focused processors. The current UI supplies conservative defaults; richer parameter editing belongs to the later authoring/UI session.
 
 ## Derived versions and recovery
 

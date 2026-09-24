@@ -1,14 +1,20 @@
 import { readFile } from "node:fs/promises";
 import { extname, posix } from "node:path";
 import { getBounds, NodeIO } from "@gltf-transform/core";
-import { KHRONOS_EXTENSIONS } from "@gltf-transform/extensions";
+import { EXTMeshoptCompression, EXTTextureAVIF, EXTTextureWebP, KHRMeshQuantization, KHRONOS_EXTENSIONS } from "@gltf-transform/extensions";
 import type { AssetStorage } from "@/lib/storage/types";
 import { parseStorageKey, type StorageKey } from "@/lib/storage/storage-key";
 import type { AssetAnalysis } from "../domain/types";
 import { AssetImportError } from "../domain/errors";
 
 type Warning = AssetAnalysis["warnings"][number];
-const supportedExtensions = new Set(KHRONOS_EXTENSIONS.map((extension) => extension.EXTENSION_NAME));
+const supportedExtensions = new Set([
+  ...KHRONOS_EXTENSIONS.map((extension) => extension.EXTENSION_NAME),
+  EXTMeshoptCompression.EXTENSION_NAME,
+  EXTTextureAVIF.EXTENSION_NAME,
+  EXTTextureWebP.EXTENSION_NAME,
+  KHRMeshQuantization.EXTENSION_NAME,
+]);
 
 export function rawGltfJson(bytes: Uint8Array, format: "gltf" | "glb"): Record<string, unknown> {
   let jsonBytes = bytes;
@@ -66,7 +72,17 @@ export async function analyzeGltf(storage: AssetStorage, primaryKey: StorageKey)
   const warnings: Warning[] = required.filter((name) => !supportedExtensions.has(name)).map((name) => ({
     code: "UNSUPPORTED_REQUIRED_EXTENSION", severity: "error", message: `Required extension ${name} is not supported; analysis may be incomplete.`,
   }));
-  const io = new NodeIO().setStrictResources(false).registerExtensions(KHRONOS_EXTENSIONS);
+  EXTTextureWebP.register();
+  EXTTextureAVIF.register();
+  const { MeshoptDecoder } = await import("meshoptimizer");
+  await MeshoptDecoder.ready;
+  const io = new NodeIO().setStrictResources(false).registerExtensions([
+    ...KHRONOS_EXTENSIONS,
+    EXTMeshoptCompression,
+    EXTTextureAVIF,
+    EXTTextureWebP,
+    KHRMeshQuantization,
+  ]).registerDependencies({ "meshopt.decoder": MeshoptDecoder });
   const jsonDocument = await io.readAsJSON(path);
   // Keep the source untouched. Removing only unknown required declarations from
   // the parser's in-memory copy allows a partial inspection with a clear warning.

@@ -1,6 +1,6 @@
 # Task 2.3 — Optimization operations
 
-**Status:** In progress; normalization/remove-unused are fixture-verified. **Depends on:** Task 2.2.
+**Status:** Accepted on 2026-09-24. **Depends on:** Task 2.2.
 
 **Outcome:** Approved operations can remove unused resources, resize/compress selected textures, apply compatible geometry/mesh compression, and create lower-detail variants where quality permits.
 
@@ -8,11 +8,11 @@
 
 **Acceptance:**
 
-- [x] Both supported operations have positive fidelity fixtures and rejected material-input cases. Resizing, compression and lower-detail operations have explicit unsupported tests.
+- [x] Normalization, unused-resource removal, texture resizing/compression, geometry compression, and lower-detail operations have positive fidelity fixtures plus rejected incompatible-input cases.
 - [x] The user must approve an operation before it runs; settings are recorded and reused on retry.
 - [x] Results record actual size/mesh/texture metrics and are accessible through the owner-scoped file route.
 - [x] A failed processor leaves its source and prior versions intact.
 
 **Likely touchpoints:** new processing modules, job records, analysis service, asset detail UI. **Evidence to record:** output validation and fidelity caveats.
 
-See [current evidence](EVIDENCE.md) for the narrow extension allowlist and unsupported capabilities. The owner browser accepted and ran the supported operation path. Texture resizing/compression, geometry/mesh compression, and lower-detail variants remain unimplemented; these checkmarks describe only the implemented contract, so Task 2.3 stays open.
+See [current evidence](EVIDENCE.md) for the extension allowlist, processor versions, measured outputs, and remaining fidelity limits. The owner browser accepted and ran the compression, normalization, comparison, revert, failure, and retry paths against isolated PostgreSQL. The operation set is complete for the current supported contract; broader exporter-specific fidelity remains a follow-up.

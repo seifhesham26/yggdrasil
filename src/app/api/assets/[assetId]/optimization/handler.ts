@@ -49,7 +49,8 @@ export function createOptimizationMutationHandler(deps: {
         return Response.json(await history.retry(session.user.id, assetId));
       }
       if (request.method === "POST" && body.operation) {
-        if (body.settings && (typeof body.settings.keepExtras !== "boolean" || Object.keys(body.settings).some((key) => key !== "keepExtras"))) return Response.json({ error: "Unsupported optimization settings" }, { status: 400 });
+        const allowedSettings = new Set(["keepExtras", "maxTextureSize", "targetFormat", "quality", "meshoptLevel", "detailRatio", "detailError"]);
+        if (body.settings && (typeof body.settings.keepExtras !== "boolean" || Object.keys(body.settings).some((key) => !allowedSettings.has(key)))) return Response.json({ error: "Unsupported optimization settings" }, { status: 400 });
         return Response.json(await history.apply({ ownerId: session.user.id, assetId, operation: body.operation, approve: body.approve === true, ...(body.settings ? { settings: body.settings } : {}) }));
       }
       return Response.json({ error: "Unsupported optimization request" }, { status: 400 });
