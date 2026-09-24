@@ -1,7 +1,8 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, or, isNull } from "drizzle-orm";
 import { db } from "@/db/client";
 import { assetFiles, assetSources, assets, assetVersions, sceneAnalyses } from "@/db/schema/assets";
 import type { AssetAnalysis } from "../domain/types";
+import { DrizzleOptimizationPersistence } from "./optimization-persistence";
 
 export type StoredAssetFile = {
   relativePath: string;
@@ -32,9 +33,13 @@ export type AssetSummary = {
 };
 export type AssetDetail = AssetSummary & {
   ownerId: string;
+  currentVersionId?: string | null;
   errorCode: string | null;
   files: StoredAssetFile[];
   analysis: AssetAnalysis | null;
+  selectedFile?: StoredAssetFile | null;
+  retainedFiles?: StoredAssetFile[];
+  sourceByteSize?: number | null;
 };
 
 export interface AssetRepository {
@@ -85,26 +90,32 @@ export class DrizzleAssetRepository implements AssetRepository {
       relativePath: assetFiles.relativePath, storageKey: assetFiles.storageKey, byteSize: assetFiles.byteSize,
       sha256: assetFiles.sha256, mimeType: assetFiles.mimeType, role: assetFiles.role,
     }).from(assetFiles).where(eq(assetFiles.sourceId, source.id)) : [];
-    const [snapshot] = await db.select({ analysis: sceneAnalyses.snapshot }).from(sceneAnalyses).where(eq(sceneAnalyses.assetId, assetId)).orderBy(desc(sceneAnalyses.createdAt)).limit(1);
-    const primary = files.find((file) => file.role === "model");
-    const analysis = snapshot?.analysis ?? null;
+    const history = asset.status === "ready" ? await new DrizzleOptimizationPersistence().load(ownerId, assetId) : undefined;
+    const selected = history?.versions.find((version) => version.id === history.currentVersionId);
+    // Version rows are the manifest for generated single-file GLBs. Source package
+    // files remain separate so all original dependencies and attribution survive.
+    const retainedFiles: StoredAssetFile[] = history?.versions.map((version) => files.find((file) => file.storageKey === version.storageKey) ?? {
+      relativePath: "model.glb", storageKey: version.storageKey, byteSize: version.byteSize, sha256: version.sha256, mimeType: "model/gltf-binary", role: "model" as const,
+    }) ?? [];
+    const primary = retainedFiles.find((file) => file.storageKey === selected?.storageKey);
+    const analysis = selected?.analysis ?? null;
     return {
-      id: asset.id, ownerId: asset.ownerId, name: asset.name, status: asset.status, errorCode: asset.errorCode,
-      createdAt: asset.createdAt, updatedAt: asset.updatedAt, byteSize: source?.byteSize ?? null,
+      id: asset.id, ownerId: asset.ownerId, currentVersionId: history?.currentVersionId ?? asset.currentVersionId, name: asset.name, status: asset.status, errorCode: asset.errorCode,
+      createdAt: asset.createdAt, updatedAt: asset.updatedAt, byteSize: selected?.byteSize ?? null, sourceByteSize: source?.byteSize ?? null,
       format: primary?.mimeType === "model/gltf-binary" ? "GLB" : primary ? "glTF" : null,
       counts: analysis ? { meshes: analysis.counts.meshes, triangles: analysis.counts.triangles, animations: analysis.counts.animations } : null,
-      files, analysis,
+      files, analysis, selectedFile: primary ?? null, retainedFiles,
     };
   }
 
   async listAssets(ownerId: string): Promise<AssetSummary[]> {
     const rows = await db.select({
       id: assets.id, name: assets.name, status: assets.status, createdAt: assets.createdAt, updatedAt: assets.updatedAt,
-      byteSize: assetSources.byteSize, mimeType: assetFiles.mimeType, analysis: sceneAnalyses.snapshot,
+      byteSize: assetVersions.byteSize, mimeType: assetVersions.mimeType, analysis: sceneAnalyses.snapshot,
     }).from(assets)
       .leftJoin(assetSources, eq(assetSources.assetId, assets.id))
       .leftJoin(assetFiles, and(eq(assetFiles.sourceId, assetSources.id), eq(assetFiles.role, "model")))
-      .leftJoin(assetVersions, and(eq(assetVersions.assetId, assets.id), eq(assetVersions.kind, "original")))
+      .leftJoin(assetVersions, and(eq(assetVersions.assetId, assets.id), or(eq(assetVersions.id, assets.currentVersionId), and(isNull(assets.currentVersionId), eq(assetVersions.kind, "original")))))
       .leftJoin(sceneAnalyses, eq(sceneAnalyses.versionId, assetVersions.id))
       .where(eq(assets.ownerId, ownerId))
       .orderBy(desc(assets.createdAt));

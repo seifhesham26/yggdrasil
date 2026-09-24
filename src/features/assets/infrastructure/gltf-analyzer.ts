@@ -10,7 +10,7 @@ import { AssetImportError } from "../domain/errors";
 type Warning = AssetAnalysis["warnings"][number];
 const supportedExtensions = new Set(KHRONOS_EXTENSIONS.map((extension) => extension.EXTENSION_NAME));
 
-function rawGltfJson(bytes: Uint8Array, format: "gltf" | "glb"): Record<string, unknown> {
+export function rawGltfJson(bytes: Uint8Array, format: "gltf" | "glb"): Record<string, unknown> {
   let jsonBytes = bytes;
   if (format === "glb") {
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -30,7 +30,7 @@ function extensionNames(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").sort() : [];
 }
 
-function validateResourceUris(value: unknown, storage: AssetStorage, primaryKey: StorageKey): void {
+export function validateResourceUris(value: unknown, storage: AssetStorage, primaryKey: StorageKey): void {
   if (!value || typeof value !== "object") return;
   if (Array.isArray(value)) {
     value.forEach((item) => validateResourceUris(item, storage, primaryKey));

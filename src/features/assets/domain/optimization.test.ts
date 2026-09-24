@@ -8,6 +8,13 @@ const clean: AssetAnalysis = {
 };
 
 describe("buildOptimizationReport", () => {
+  it.each([
+    { ...clean, extensionsUsed: ["VENDOR_material_secret"] },
+    { ...clean, warnings: [{ code: "MISSING_TEXTURE", severity: "warning" as const, message: "Missing image" }] },
+  ])("disables normalization and explains incompatible material input", (analysis) => {
+    const normalization = buildOptimizationReport(analysis, 1000).findings.find((finding) => finding.operation === "normalize");
+    expect(normalization).toMatchObject({ supported: false, warning: expect.any(String) });
+  });
   it("is stable, specific, and deduplicated", () => {
     const report = buildOptimizationReport({ ...clean, counts: { ...clean.counts, triangles: 300_000 }, warnings: [{ code: "HIGH_TRIANGLE_COUNT", severity: "warning", message: "large" }] }, 1000);
     expect(report.state).toBe("recommendations");

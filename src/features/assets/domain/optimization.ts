@@ -1,6 +1,16 @@
 import type { AssetAnalysis } from "./types";
 
 export type OptimizationOperation = "remove-unused" | "normalize" | "resize-textures" | "compress-geometry" | "lower-detail";
+// Only extensions with fidelity fixtures are eligible for a rewrite. Others can
+// still be imported/inspected, but must not be silently dropped by optimization.
+export const optimizationExtensions = new Set(["KHR_materials_unlit", "KHR_materials_clearcoat"]);
+
+export function optimizationWarnings(analysis: Pick<AssetAnalysis, "extensionsUsed" | "warnings">): string[] {
+  return [
+    ...analysis.extensionsUsed.filter((name) => !optimizationExtensions.has(name)).map((name) => `Material/extension fidelity is not verified for ${name}; optimization is disabled.`),
+    ...analysis.warnings.filter((warning) => warning.severity === "error" || warning.code === "MISSING_TEXTURE").map((warning) => warning.message),
+  ];
+}
 export type FindingKind = "unused-resources" | "oversized-texture" | "expensive-geometry" | "safe-normalization";
 
 export type OptimizationFinding = {
@@ -51,12 +61,12 @@ export function buildOptimizationReport(analysis: AssetAnalysis, byteSize: numbe
       warning: "Automatic simplification is not enabled; inspect the visual trade-off before adding a simplifier.",
     }));
   }
-  const hasUnsupportedRequiredExtension = analysis.warnings.some((warning) => warning.code === "UNSUPPORTED_REQUIRED_EXTENSION");
-  if (!hasUnsupportedRequiredExtension && analysis.counts.nodes > 0) {
+  const blockers = optimizationWarnings(analysis);
+  if (analysis.counts.nodes > 0) {
     findings.push(finding({
       kind: "safe-normalization", operation: "normalize", affectedResourceIds: ["scene"],
       evidence: "The scene can be rewritten with deterministic resource pruning and deduplication.", estimatedGain: { label: "estimate", bytes: Math.max(0, Math.floor(byteSize * 0.05)), percent: 5 },
-      qualityRisk: "low", supported: true,
+      qualityRisk: "low", supported: blockers.length === 0, warning: blockers.length ? blockers.join(" ") : undefined,
     }));
   }
   const unique = [...new Map(findings.map((item) => [item.id, item])).values()];

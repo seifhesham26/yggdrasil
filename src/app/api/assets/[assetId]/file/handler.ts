@@ -45,7 +45,7 @@ export function createFileHandler(deps: {
     const key = new URL(request.url).searchParams.get("key");
     if (!key) return Response.json({ code: "NOT_FOUND" }, { status: 404 });
     const asset = await deps.getAsset(assetId, session.user.id);
-    const file = asset?.status === "ready" ? asset.files.find((entry) => entry.storageKey === key) : undefined;
+    const file = asset?.status === "ready" ? [...asset.files, ...(asset.retainedFiles ?? [])].find((entry) => entry.storageKey === key) : undefined;
     if (!file) return Response.json({ code: "NOT_FOUND" }, { status: 404 });
     let path: string;
     let size: number;
