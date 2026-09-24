@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
 import { existsSync, lstatSync, mkdirSync, realpathSync } from "node:fs";
-import { open, readFile, rename, rm } from "node:fs/promises";
+import { copyFile, open, readFile, rename, rm } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { AssetStorage } from "./types";
 import { parseStorageKey, type StorageKey } from "./storage-key";
@@ -47,6 +47,13 @@ export class LocalAssetStorage implements AssetStorage {
     } finally {
       await file.close();
     }
+  }
+
+  async putFile(key: StorageKey, sourcePath: string): Promise<void> {
+    const target = this.processingPath(key);
+    mkdirSync(resolve(target, ".."), { recursive: true });
+    this.processingPath(key);
+    await copyFile(sourcePath, target, constants.COPYFILE_EXCL);
   }
 
   async read(key: StorageKey): Promise<Uint8Array> {

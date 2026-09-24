@@ -1,11 +1,19 @@
+import { createHash } from "node:crypto";
+import { createWriteStream } from "node:fs";
+import { mkdtemp, open, readFile, rm } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { unzipSync } from "fflate";
 import { fileTypeFromBuffer } from "file-type";
+import * as yauzl from "yauzl";
 import { AssetImportError } from "../domain/errors";
-import type { ImportFile, ImportManifest } from "../domain/types";
+import type { FileBackedImportFile, ImportFile, ImportManifest, ImportSource } from "../domain/types";
 
 const MAX_ENTRIES = 10_000;
 const MAX_EXPANDED_BYTES = 1024 ** 3;
 const MAX_RATIO = 100;
+const MAX_SINGLE_FILE_BYTES = 256 * 1024 ** 2;
 const allowed = new Set([".gltf", ".glb", ".fbx", ".obj", ".mtl", ".bin", ".png", ".jpg", ".jpeg", ".webp", ".ktx2", ".txt", ".md"]);
 const modelExtensions = new Set([".gltf", ".glb", ".fbx", ".obj"]);
 const attributionExtensions = new Set([".txt", ".md"]);
@@ -64,14 +72,32 @@ function dependencyPath(base: string, referenced: string): string {
   return result.join("/");
 }
 
-function validateObjDependencies(model: ImportFile, files: Map<string, ImportFile>): void {
-  const text = decoder.decode(model.bytes);
+export async function readImportBytes(file: ImportSource): Promise<Uint8Array> {
+  if ("bytes" in file) return file.bytes;
+  if (file.byteSize > MAX_SINGLE_FILE_BYTES) fail("ARCHIVE_LIMIT_EXCEEDED", `Model or dependency file exceeds the processing limit: ${file.relativePath}`);
+  return new Uint8Array(await readFile(file.path));
+}
+
+async function fileHead(file: ImportSource, length = 4100): Promise<Uint8Array> {
+  if ("bytes" in file) return file.bytes.subarray(0, length);
+  const handle = await open(file.path, "r");
+  try {
+    const buffer = Buffer.alloc(Math.min(file.byteSize, length));
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
+  }
+}
+
+async function validateObjDependencies(model: ImportSource, files: Map<string, ImportSource>): Promise<void> {
+  const text = decoder.decode(await readImportBytes(model));
   const references = [...text.matchAll(/^\s*mtllib\s+(.+)$/gim)].flatMap((match) => match[1].trim().split(/\s+/));
   if (!/^\s*(?:v|f)\s+/m.test(text)) fail("INVALID_FILE", `Malformed OBJ model: ${model.relativePath}`);
   for (const reference of references) {
     const path = dependencyPath(model.relativePath, reference);
     if (!files.has(path)) fail("MISSING_DEPENDENCY", `OBJ model references missing MTL file: ${path}`);
-    const mtl = decoder.decode(files.get(path)!.bytes);
+    const mtl = decoder.decode(await readImportBytes(files.get(path)!));
     for (const match of mtl.matchAll(/^\s*(?:map_[^\s]+|bump|disp|decal)\s+(.+)$/gim)) {
       const texture = match[1].trim().split(/\s+/).at(-1)!;
       const texturePath = dependencyPath(path, texture);
@@ -80,11 +106,12 @@ function validateObjDependencies(model: ImportFile, files: Map<string, ImportFil
   }
 }
 
-function validateFbx(file: ImportFile): void {
-  const binaryHeader = new TextDecoder("latin1").decode(file.bytes.subarray(0, 21));
-  const asciiHeader = new TextDecoder("utf-8").decode(file.bytes.subarray(0, 256));
-  if (!binaryHeader.startsWith("Kaydara FBX Binary") && !/^\s*;\s*FBX\s+/i.test(asciiHeader)) {
-    fail("INVALID_FILE", `Malformed FBX model: ${file.relativePath}`);
+function validateFbx(path: string, header: Uint8Array): void {
+  const binaryHeader = new TextDecoder("latin1").decode(header.subarray(0, 21));
+  if (binaryHeader.startsWith("Kaydara FBX Binary")) return;
+  const asciiHeader = new TextDecoder("utf-8").decode(header.subarray(0, 256));
+  if (!/^\s*;\s*FBX\s+/i.test(asciiHeader)) {
+    fail("INVALID_FILE", `Malformed FBX model: ${path}`);
   }
 }
 
@@ -189,36 +216,98 @@ function expandZip(archive: Uint8Array): ImportFile[] {
   });
 }
 
-export async function buildImportManifest(entries: ImportFile[]): Promise<ImportManifest> {
+async function expandZipFile(archive: FileBackedImportFile): Promise<FileBackedImportFile[]> {
+  const zip = await yauzl.openPromise(archive.path, { autoClose: false, strictFileNames: true, validateEntrySizes: true }).catch((error: unknown) => {
+    fail("INVALID_ARCHIVE", `ZIP could not be opened: ${error instanceof Error ? error.message : "unknown error"}`);
+  });
+  const directory = await mkdtemp(join(dirname(archive.path), "expanded-"));
+  const files: FileBackedImportFile[] = [];
+  const seen = new Set<string>();
+  let declaredTotal = 0;
+  let actualTotal = 0;
+  let count = 0;
+  try {
+    for await (const entry of zip.eachEntry()) {
+      if (++count > MAX_ENTRIES) fail("ARCHIVE_LIMIT_EXCEEDED", "ZIP contains too many entries");
+      const isDirectory = entry.fileName.endsWith("/");
+      const name = normalizePath(isDirectory ? entry.fileName.slice(0, -1) : entry.fileName);
+      const folded = name.toLocaleLowerCase("en-US");
+      if (seen.has(folded)) fail("INVALID_ARCHIVE", `Duplicate ZIP path: ${name}`);
+      seen.add(folded);
+      const mode = entry.versionMadeBy >>> 8 === 3 ? (entry.externalFileAttributes >>> 16) & 0o170000 : 0;
+      if (mode !== 0 && mode !== 0o100000 && mode !== 0o040000) fail("INVALID_ARCHIVE", `ZIP contains a link or special file: ${name}`);
+      if (entry.isEncrypted() || entry.compressionMethod !== 0 && entry.compressionMethod !== 8) fail("INVALID_ARCHIVE", `Encrypted or unsupported ZIP entry: ${name}`);
+      if (isDirectory) continue;
+      validateName(name);
+      declaredTotal += entry.uncompressedSize;
+      if (declaredTotal > MAX_EXPANDED_BYTES || entry.uncompressedSize > MAX_SINGLE_FILE_BYTES || entry.uncompressedSize > entry.compressedSize * MAX_RATIO) {
+        fail("ARCHIVE_LIMIT_EXCEEDED", `ZIP expansion exceeds the limit: ${name}`);
+      }
+      const path = join(directory, `${files.length}.part`);
+      const hash = createHash("sha256");
+      let byteSize = 0;
+      const meter = new Transform({
+        transform(chunk: Buffer, _encoding, callback) {
+          byteSize += chunk.byteLength;
+          actualTotal += chunk.byteLength;
+          if (byteSize > MAX_SINGLE_FILE_BYTES || actualTotal > MAX_EXPANDED_BYTES) return callback(new AssetImportError("ARCHIVE_LIMIT_EXCEEDED", `ZIP actual expansion exceeds the limit: ${name}`));
+          hash.update(chunk);
+          callback(null, chunk);
+        },
+      });
+      await pipeline(await zip.openReadStreamPromise(entry), meter, createWriteStream(path, { flags: "wx", mode: 0o600 }));
+      if (byteSize !== entry.uncompressedSize) fail("INVALID_ARCHIVE", `ZIP entry size disagrees: ${name}`);
+      files.push({ relativePath: name, path, byteSize, sha256: hash.digest("hex") });
+    }
+    return files;
+  } catch (error) {
+    await rm(directory, { recursive: true, force: true });
+    if (error instanceof AssetImportError) throw error;
+    fail("INVALID_ARCHIVE", `ZIP extraction failed: ${error instanceof Error ? error.message : "unknown error"}`);
+  } finally {
+    zip.close();
+  }
+}
+
+export function buildImportManifest(entries: ImportFile[]): Promise<ImportManifest>;
+export function buildImportManifest(entries: FileBackedImportFile[]): Promise<ImportManifest<FileBackedImportFile>>;
+export function buildImportManifest(entries: ImportSource[]): Promise<ImportManifest<ImportSource>>;
+export async function buildImportManifest(entries: ImportSource[]): Promise<ImportManifest<ImportSource>> {
   if (entries.length === 0) fail("NO_PRIMARY_MODEL", "No files were provided");
+  if (entries.length > MAX_ENTRIES) fail("ARCHIVE_LIMIT_EXCEEDED", "Import contains too many files");
   const zipEntries = entries.filter((entry) => extension(entry.relativePath) === ".zip");
   if (zipEntries.length > 0 && (zipEntries.length !== 1 || entries.length !== 1)) {
     fail("INVALID_ARCHIVE", "Import one ZIP or direct files, not both");
   }
-  const archive = zipEntries.length
-    ? { relativePath: validateName(zipEntries[0].relativePath, true), bytes: zipEntries[0].bytes }
-    : undefined;
-  const files = zipEntries.length ? expandZip(zipEntries[0].bytes) : entries;
-  const normalized: ImportFile[] = [];
+  const total = entries.reduce((sum, entry) => sum + ("bytes" in entry ? entry.bytes.byteLength : entry.byteSize), 0);
+  if (total > MAX_EXPANDED_BYTES) fail("ARCHIVE_LIMIT_EXCEEDED", "Import source package exceeds the byte limit");
+  const archive = zipEntries.length ? { ...zipEntries[0], relativePath: validateName(zipEntries[0].relativePath, true) } : undefined;
+  const files = archive ? "bytes" in archive ? expandZip(archive.bytes) : await expandZipFile(archive) : entries;
+  const normalized: ImportSource[] = [];
   const seen = new Set<string>();
   for (const entry of files) {
     const relativePath = validateName(entry.relativePath);
+    const byteSize = "bytes" in entry ? entry.bytes.byteLength : entry.byteSize;
+    if (!Number.isSafeInteger(byteSize) || byteSize < 0 || byteSize > MAX_SINGLE_FILE_BYTES) {
+      fail("ARCHIVE_LIMIT_EXCEEDED", `File exceeds the processing limit: ${relativePath}`);
+    }
     const folded = relativePath.toLocaleLowerCase("en-US");
     if (seen.has(folded)) fail("INVALID_PATH", `Duplicate import path: ${relativePath}`);
     seen.add(folded);
     const ext = extension(relativePath);
     // jsdom uploads can carry a Uint8Array from another realm; Buffer normalizes it
     // for file-type's Node-side instanceof check.
-    const signature = await fileTypeFromBuffer(Buffer.from(entry.bytes));
+    const head = await fileHead(entry);
+    const signature = await fileTypeFromBuffer(Buffer.from(head));
     if (signature && expectedMime[ext] && signature.mime !== expectedMime[ext]) {
       fail("INVALID_FILE", `File signature does not match extension: ${relativePath}`);
     }
-    if (ext === ".glb" && (entry.bytes.length < 4 || decoder.decode(entry.bytes.subarray(0, 4)) !== "glTF")) {
+    if (ext === ".glb" && (head.length < 4 || decoder.decode(head.subarray(0, 4)) !== "glTF")) {
       fail("INVALID_FILE", `Invalid GLB header: ${relativePath}`);
     }
     if (ext === ".gltf") {
       try {
-        const document: unknown = JSON.parse(decoder.decode(entry.bytes));
+        const document: unknown = JSON.parse(decoder.decode(await readImportBytes(entry)));
         if (!document || typeof document !== "object" || !("asset" in document) || !document.asset || typeof document.asset !== "object" || !("version" in document.asset) || typeof document.asset.version !== "string" || !document.asset.version.startsWith("2.")) {
           fail("INVALID_FILE", `Unsupported glTF version: ${relativePath}`);
         }
@@ -228,16 +317,16 @@ export async function buildImportManifest(entries: ImportFile[]): Promise<Import
       }
     }
     if (ext === ".obj") {
-      try { decoder.decode(entry.bytes); } catch { fail("INVALID_FILE", `Malformed OBJ model: ${relativePath}`); }
+      try { decoder.decode(await readImportBytes(entry)); } catch { fail("INVALID_FILE", `Malformed OBJ model: ${relativePath}`); }
     }
-    if (ext === ".fbx") validateFbx(entry);
-    normalized.push({ relativePath, bytes: entry.bytes });
+    if (ext === ".fbx") validateFbx(relativePath, head);
+    normalized.push({ ...entry, relativePath });
   }
   const models = normalized.filter((entry) => modelExtensions.has(extension(entry.relativePath)));
   if (!models.length) fail("NO_PRIMARY_MODEL", "Import contains no glTF or GLB model");
   if (models.length > 1) throw new AssetImportError("AMBIGUOUS_PRIMARY_MODEL", "Select one primary model", models.map((entry) => entry.relativePath));
   const byPath = new Map(normalized.map((entry) => [entry.relativePath, entry]));
-  if (extension(models[0].relativePath) === ".obj") validateObjDependencies(models[0], byPath);
+  if (extension(models[0].relativePath) === ".obj") await validateObjDependencies(models[0], byPath);
   return {
     primaryModel: models[0],
     archive,

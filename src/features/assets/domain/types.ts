@@ -1,11 +1,13 @@
 export type ImportFile = { relativePath: string; bytes: Uint8Array };
+export type FileBackedImportFile = { relativePath: string; path: string; byteSize: number; sha256: string };
+export type ImportSource = ImportFile | FileBackedImportFile;
 
-export type ImportManifest = {
-  primaryModel: ImportFile;
-  archive?: ImportFile;
-  dependencies: ImportFile[];
-  attributionFiles: ImportFile[];
-  thumbnails: ImportFile[];
+export type ImportManifest<T extends ImportSource = ImportFile> = {
+  primaryModel: T;
+  archive?: T;
+  dependencies: T[];
+  attributionFiles: T[];
+  thumbnails: T[];
   warnings: Array<{ code: string; message: string }>;
 };
 

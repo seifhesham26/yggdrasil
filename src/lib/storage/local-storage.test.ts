@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -28,6 +28,17 @@ describe("LocalAssetStorage", () => {
       .toEqual(Buffer.from(bytes));
     await expect(storage.put(key, new Uint8Array([9]))).rejects.toThrow();
     expect(await storage.read(key)).toEqual(bytes);
+  });
+
+  it("copies a spooled source without overwriting an existing destination", async () => {
+    const source = join(root, "input.part");
+    const original = Buffer.from([0, 1, 2, 255]);
+    await writeFile(source, original);
+    const key = parseStorageKey("staging/import-a/model.glb");
+    await storage.putFile(key, source);
+    expect(await storage.read(key)).toEqual(new Uint8Array(original));
+    await expect(storage.putFile(key, source)).rejects.toThrow();
+    expect(await readFile(source)).toEqual(original);
   });
 
   it("commits a staged tree and removes abandoned staging trees", async () => {

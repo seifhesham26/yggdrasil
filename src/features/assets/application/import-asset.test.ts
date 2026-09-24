@@ -1,10 +1,13 @@
 // @vitest-environment node
 import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { zipSync } from "fflate";
 import type { AssetStorage } from "@/lib/storage/types";
 import type { StorageKey } from "@/lib/storage/storage-key";
-import type { AssetAnalysis, ImportFile, ImportManifest } from "../domain/types";
+import type { AssetAnalysis, ImportFile, ImportManifest, ImportSource } from "../domain/types";
 import type { AssetRepository, CompleteImportRecord } from "../infrastructure/asset-repository";
 import { createImportAsset } from "./import-asset";
 import { buildImportManifest } from "../infrastructure/import-manifest";
@@ -28,6 +31,7 @@ function fakes() {
   let failure: { assetId: string; ownerId: string; code: string } | undefined;
   const storage: AssetStorage = {
     async put(key, bytes) { events.push(`put:${key}`); files.set(key, new Uint8Array(bytes)); },
+    async putFile(key, path) { events.push(`putFile:${key}`); files.set(key, new Uint8Array(await readFile(path))); },
     async read(key) { const value = files.get(key); if (!value) throw new Error("missing"); return value; },
     async exists(key) { return files.has(key); },
     async removeTree(prefix) { events.push(`remove:${prefix}`); for (const key of files.keys()) if (key.startsWith(`${prefix}/`)) files.delete(key); },
@@ -48,7 +52,7 @@ function fakes() {
     async listAssets() { return []; },
   };
   const manifest: ImportManifest = { primaryModel: model, dependencies: [binary], attributionFiles: [], thumbnails: [], warnings: [] };
-  const buildManifest = vi.fn(async (_entries: ImportFile[]) => manifest);
+  const buildManifest = vi.fn(async (_entries: ImportSource[]): Promise<ImportManifest<ImportSource>> => manifest);
   const analyze = vi.fn(async (_storage: AssetStorage, key: StorageKey) => {
     events.push(`analyze:${key}`);
     expect(files.has("staging/import-1/folder/triangle.gltf")).toBe(true);
@@ -59,6 +63,23 @@ function fakes() {
 }
 
 describe("createImportAsset", () => {
+  it("imports file-backed sources without replacing their original bytes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "yggdrasil-file-import-test-"));
+    try {
+      const path = join(root, "model.part");
+      await writeFile(path, model.bytes);
+      const source = { relativePath: model.relativePath, path, byteSize: model.bytes.length, sha256: createHash("sha256").update(model.bytes).digest("hex") };
+      const deps = fakes();
+      deps.analyze.mockResolvedValueOnce(analysis);
+      const importAsset = createImportAsset({ ...deps, buildManifest: buildImportManifest, createId: () => "import-1" });
+      await importAsset({ ownerId: "owner-1", name: "Triangle", entries: [source] });
+      expect(deps.events).toContain(`putFile:staging/import-1/${model.relativePath}`);
+      expect(deps.getComplete()?.files).toContainEqual(expect.objectContaining({ sha256: source.sha256, byteSize: source.byteSize }));
+      expect(await readFile(path)).toEqual(Buffer.from(model.bytes));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
   it("stores an uploaded ZIP byte-for-byte with its extracted source files and hash", async () => {
     const deps = fakes();
     const archive: ImportFile = { relativePath: "bundle.zip", bytes: zipSync({ "folder/triangle.gltf": model.bytes, "folder/triangle.bin": binary.bytes }) };

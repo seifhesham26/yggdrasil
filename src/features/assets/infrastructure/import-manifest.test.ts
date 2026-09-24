@@ -1,8 +1,12 @@
 // @vitest-environment node
-import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import { zipSync } from "fflate";
 import { AssetImportError } from "../domain/errors";
-import type { ImportFile } from "../domain/types";
+import type { FileBackedImportFile, ImportFile } from "../domain/types";
 import { buildImportManifest } from "./import-manifest";
 import { createGltfFixture } from "@/test/fixtures/create-gltf-fixture";
 
@@ -10,6 +14,19 @@ const glb = new Uint8Array([0x67, 0x6c, 0x54, 0x46, 2, 0, 0, 0, 12, 0, 0, 0]);
 const file = (relativePath: string, bytes = new Uint8Array([1, 2, 3])): ImportFile => ({ relativePath, bytes });
 const bytes = (value: string) => new TextEncoder().encode(value);
 const zipFile = (entries: Record<string, Uint8Array>) => file("bundle.zip", zipSync(entries));
+const temporaryRoots: string[] = [];
+
+afterEach(async () => {
+  for (const root of temporaryRoots.splice(0)) await rm(root, { recursive: true, force: true });
+});
+
+async function diskFile(relativePath: string, bytes: Uint8Array): Promise<FileBackedImportFile> {
+  const root = await mkdtemp(join(tmpdir(), "yggdrasil-manifest-test-"));
+  temporaryRoots.push(root);
+  const path = join(root, "source.part");
+  await writeFile(path, bytes);
+  return { relativePath, path, byteSize: bytes.byteLength, sha256: createHash("sha256").update(bytes).digest("hex") };
+}
 
 function editCentral(zip: Uint8Array, edit: (view: DataView, offset: number) => void) {
   const copy = new Uint8Array(zip);
@@ -86,6 +103,55 @@ describe("buildImportManifest", () => {
     expect(result.archive).toEqual(archive);
     expect(result.archive?.bytes).toEqual(original);
     expect(result.dependencies).not.toContainEqual(archive);
+  });
+
+  it("validates file-backed OBJ dependencies without materializing a byte-backed manifest", async () => {
+    const entries = await Promise.all([
+      diskFile("scene/model.obj", bytes("mtllib model.mtl\nv 0 0 0\nf 1 1 1\n")),
+      diskFile("scene/model.mtl", bytes("newmtl paint\nmap_Kd checker.png\n")),
+      diskFile("scene/checker.png", Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/9xkAAAAASUVORK5CYII=", "base64")),
+    ]);
+    const manifest = await buildImportManifest(entries);
+    expect(manifest.primaryModel).toEqual(entries[0]);
+    expect(manifest.dependencies).toEqual(entries.slice(1));
+    expect(await readFile(entries[0].path)).toEqual(Buffer.from(bytes("mtllib model.mtl\nv 0 0 0\nf 1 1 1\n")));
+  });
+
+  it("expands a file-backed ZIP one entry at a time and retains original archive bytes", async () => {
+    const original = zipSync({ "folder/hero.glb": glb, "folder/LICENSE.txt": bytes("CC0") });
+    const archive = await diskFile("package.zip", original);
+    const manifest = await buildImportManifest([archive]);
+    expect(manifest.archive).toEqual(archive);
+    expect(manifest.primaryModel.relativePath).toBe("folder/hero.glb");
+    expect(await readFile(manifest.primaryModel.path)).toEqual(Buffer.from(glb));
+    expect(await readFile(archive.path)).toEqual(Buffer.from(original));
+  });
+
+  it("rejects a file-backed ZIP symlink without altering the archive", async () => {
+    const original = editCentral(zipSync({ "hero.glb": glb }), (view, offset) => {
+      view.setUint16(offset + 4, 3 << 8, true);
+      view.setUint32(offset + 38, 0o120777 << 16, true);
+    });
+    const archive = await diskFile("package.zip", original);
+    await expect(buildImportManifest([archive])).rejects.toMatchObject({ code: "INVALID_ARCHIVE" });
+    expect(await readFile(archive.path)).toEqual(Buffer.from(original));
+  });
+
+  it("rejects file-backed ZIP traversal and declared expansion bombs", async () => {
+    const traversal = await diskFile("traversal.zip", zipSync({ "../evil.glb": glb }));
+    await expect(buildImportManifest([traversal])).rejects.toMatchObject({ code: expect.stringMatching(/INVALID_ARCHIVE|INVALID_PATH/) });
+    const bomb = await diskFile("bomb.zip", editCentral(zipSync({ "hero.glb": glb }), (view, offset) => view.setUint32(offset + 24, 1024 ** 3 + 1, true)));
+    await expect(buildImportManifest([bomb])).rejects.toMatchObject({ code: "ARCHIVE_LIMIT_EXCEEDED" });
+  });
+
+  it("reports a malformed file-backed ZIP as an archive error", async () => {
+    const archive = await diskFile("broken.zip", bytes("not a ZIP"));
+    await expect(buildImportManifest([archive])).rejects.toMatchObject({ code: "INVALID_ARCHIVE" });
+  });
+
+  it("rejects a direct file that exceeds the bounded parser limit before reading it", async () => {
+    const source = await diskFile("huge.glb", glb);
+    await expect(buildImportManifest([{ ...source, byteSize: 256 * 1024 ** 2 + 1 }])).rejects.toMatchObject({ code: "ARCHIVE_LIMIT_EXCEEDED" });
   });
 
   it("accepts OBJ packages and keeps MTL and texture dependencies", async () => {

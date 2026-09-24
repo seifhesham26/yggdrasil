@@ -5,6 +5,7 @@ import { isAbsolute, join } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import Busboy from "busboy";
+import type { FileBackedImportFile } from "../domain/types";
 
 type UploadCode = "UPLOAD_TOO_LARGE" | "TOO_MANY_FILES" | "INVALID_MULTIPART" | "INVALID_MANIFEST" | "NO_FILES";
 
@@ -15,7 +16,7 @@ export class UploadError extends Error {
   }
 }
 
-export type StagedUploadFile = { relativePath: string; path: string; byteSize: number; sha256: string };
+export type StagedUploadFile = FileBackedImportFile;
 export type StagedUpload = { entries: StagedUploadFile[]; name?: string; cleanup: () => Promise<void> };
 
 export type UploadLimits = {

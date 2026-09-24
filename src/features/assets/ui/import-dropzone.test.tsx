@@ -15,10 +15,20 @@ describe("ImportDropzone", () => {
     Object.defineProperty(file, "webkitRelativePath", { value: "creature/model.gltf" });
     await user.upload(input, file);
     await user.click(screen.getByRole("button", { name: "Import asset" }));
-    expect(upload).toHaveBeenCalledWith(expect.arrayContaining([
-      expect.objectContaining({ relativePath: "creature/model.gltf", bytes: expect.any(Uint8Array) }),
-    ]));
+    expect(upload.mock.calls[0][0]).toEqual([file]);
     expect(await screen.findByText("Import complete")).toBeVisible();
+  });
+
+  it("passes native files to the upload without reading them into browser memory", async () => {
+    const user = userEvent.setup();
+    const file = new File(["glTF"], "model.glb");
+    const read = vi.spyOn(file, "arrayBuffer");
+    const upload = vi.fn().mockResolvedValue({ assetId: "asset-1", status: "ready" });
+    render(<ImportDropzone upload={upload} />);
+    await user.upload(screen.getByLabelText("Choose model files"), file);
+    await user.click(screen.getByRole("button", { name: "Import asset" }));
+    expect(upload.mock.calls[0][0][0]).toBe(file);
+    expect(read).not.toHaveBeenCalled();
   });
 
   it("offers FBX and OBJ packages in the model picker", () => {
@@ -55,6 +65,19 @@ describe("ImportDropzone", () => {
     expect(screen.getByLabelText("Choose model files")).toBeDisabled();
     resolveUpload({ assetId: "asset-1", status: "ready" });
     expect(await screen.findByText("Import complete")).toBeVisible();
+  });
+
+  it("can abort an active upload and keep the selected files for retry", async () => {
+    const user = userEvent.setup();
+    const upload = vi.fn((_files: File[], _progress: (sent: number, total: number) => void, signal: AbortSignal) => new Promise<never>((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(new DOMException("Upload cancelled", "AbortError")), { once: true });
+    }));
+    render(<ImportDropzone upload={upload} />);
+    await user.upload(screen.getByLabelText("Choose model files"), new File(["glTF"], "model.glb"));
+    await user.click(screen.getByRole("button", { name: "Import asset" }));
+    await user.click(screen.getByRole("button", { name: "Cancel upload" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Upload cancelled.");
+    expect(screen.getByRole("button", { name: "Import asset" })).toBeEnabled();
   });
 
   it("opens the file picker from the keyboard-accessible drop target", async () => {

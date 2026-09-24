@@ -10,7 +10,9 @@ Yggdrasil runs locally from `C:\dev\yggdrasil`. The toolchain verified for this 
 4. Set `BETTER_AUTH_URL=http://localhost:3000`, `YGGDRASIL_OWNER_EMAIL` to your own email, and `YGGDRASIL_ASSET_ROOT` to an absolute local directory such as `C:\dev\yggdrasil-data`. The owner email is the only address allowed to register. Keep the storage directory outside the repository when possible.
 5. Run `pnpm db:migrate` to apply the Drizzle schema. Then run `pnpm dev` and open `http://localhost:3000/sign-in`. With an empty owner table, use **Create owner account** with the configured email. Alternatively, run `pnpm auth:create-owner` in an interactive terminal and enter a password of at least 12 characters. Once an owner exists, public registration is closed.
 
-The import flow currently accepts GLTF/GLB, their supported dependencies, and ZIP packages. FBX/OBJ conversion and the rest of the editing workflow are planned in [the roadmap](roadmap/README.md), not present in this milestone.
+The import flow accepts glTF/GLB, FBX, OBJ with MTL/texture dependencies, folders, and ZIPs. FBX and OBJ are converted to web-ready GLBs; the original package is retained. OBJ materials and some FBX exporter features may not convert faithfully, so inspect the warnings in the asset report. The rest of the editing workflow is tracked in [the roadmap](roadmap/README.md).
+
+Uploads stream into protected temporary files. Current limits are 1 GiB of multipart or ZIP source bytes, 10,000 files/ZIP entries, 1 GiB of expanded ZIP content, 256 MiB per processed file, and a 100:1 declared ZIP expansion ratio. ZIP entry paths, symlinks, encryption, and actual extracted bytes are checked before an asset is made ready. The import still completes in one HTTP request; persisted background jobs and restart recovery are [Task 1.2](roadmap/phase-1-imports/02-large-packages.md) work in progress.
 
 ## Verification
 

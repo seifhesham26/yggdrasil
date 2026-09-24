@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { Client } from "pg";
+import { zipSync } from "fflate";
 import { readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -185,4 +186,24 @@ test("owner imports models, reopens previews, and completes optimization workflo
       expect(await (await page.request.get(fileUrl(fixture.model))).body()).toEqual(await readFile(join(fixtureDir, fixture.model)));
     });
   }
+
+  await test.step("import and reopen a ZIP with its unchanged archive", async () => {
+    const archive = zipSync({ "folder/triangle.gltf": model.bytes, "folder/triangle.bin": binary.bytes });
+    await page.goto("/library");
+    await page.getByLabel("Choose ZIP").setInputFiles({ name: "triangle.zip", mimeType: "application/zip", buffer: Buffer.from(archive) });
+    const [importResponse] = await Promise.all([
+      page.waitForResponse((candidate) => candidate.url().endsWith("/api/assets/import")),
+      page.getByRole("button", { name: "Import asset" }).click(),
+    ]);
+    expect(importResponse.status(), await importResponse.text()).toBe(201);
+    const { assetId: zipAssetId } = await importResponse.json() as { assetId: string };
+    await page.getByRole("link", { name: "Open asset report" }).click();
+    await expect(page).toHaveURL(new RegExp(`/assets/${zipAssetId}$`));
+    await expect(page.locator(".analysis-counts div").filter({ hasText: "Triangles" })).toContainText("1");
+    const archiveFile = `/api/assets/${zipAssetId}/file?key=${encodeURIComponent(`assets/${zipAssetId}/source/triangle.zip`)}`;
+    expect(await (await page.request.get(archiveFile)).body()).toEqual(Buffer.from(archive));
+    await page.reload();
+    await expect(page.getByRole("progressbar", { name: "Loading model" })).toBeHidden({ timeout: 30_000 });
+    expect(await (await page.request.get(archiveFile)).body()).toEqual(Buffer.from(archive));
+  });
 });
