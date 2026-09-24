@@ -195,7 +195,9 @@ export async function buildImportManifest(entries: ImportFile[]): Promise<Import
   if (zipEntries.length > 0 && (zipEntries.length !== 1 || entries.length !== 1)) {
     fail("INVALID_ARCHIVE", "Import one ZIP or direct files, not both");
   }
-  if (zipEntries.length) validateName(zipEntries[0].relativePath, true);
+  const archive = zipEntries.length
+    ? { relativePath: validateName(zipEntries[0].relativePath, true), bytes: zipEntries[0].bytes }
+    : undefined;
   const files = zipEntries.length ? expandZip(zipEntries[0].bytes) : entries;
   const normalized: ImportFile[] = [];
   const seen = new Set<string>();
@@ -238,6 +240,7 @@ export async function buildImportManifest(entries: ImportFile[]): Promise<Import
   if (extension(models[0].relativePath) === ".obj") validateObjDependencies(models[0], byPath);
   return {
     primaryModel: models[0],
+    archive,
     dependencies: normalized.filter((entry) => !modelExtensions.has(extension(entry.relativePath)) && !attributionExtensions.has(extension(entry.relativePath))),
     attributionFiles: normalized.filter((entry) => attributionExtensions.has(extension(entry.relativePath))),
     thumbnails: normalized.filter((entry) => imageExtensions.has(extension(entry.relativePath))),

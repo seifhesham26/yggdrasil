@@ -78,9 +78,14 @@ describe("buildImportManifest", () => {
   });
 
   it("expands a ZIP before selecting the model", async () => {
-    const result = await buildImportManifest([zipFile({ "folder/hero.glb": glb, "folder/LICENSE.txt": bytes("license") })]);
+    const archive = zipFile({ "folder/hero.glb": glb, "folder/LICENSE.txt": bytes("license") });
+    const original = new Uint8Array(archive.bytes);
+    const result = await buildImportManifest([archive]);
     expect(result.primaryModel.relativePath).toBe("folder/hero.glb");
     expect(result.attributionFiles[0].relativePath).toBe("folder/LICENSE.txt");
+    expect(result.archive).toEqual(archive);
+    expect(result.archive?.bytes).toEqual(original);
+    expect(result.dependencies).not.toContainEqual(archive);
   });
 
   it("accepts OBJ packages and keeps MTL and texture dependencies", async () => {

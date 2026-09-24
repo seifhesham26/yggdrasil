@@ -1,11 +1,13 @@
 // @vitest-environment node
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
+import { zipSync } from "fflate";
 import type { AssetStorage } from "@/lib/storage/types";
 import type { StorageKey } from "@/lib/storage/storage-key";
 import type { AssetAnalysis, ImportFile, ImportManifest } from "../domain/types";
 import type { AssetRepository, CompleteImportRecord } from "../infrastructure/asset-repository";
 import { createImportAsset } from "./import-asset";
+import { buildImportManifest } from "../infrastructure/import-manifest";
 
 const assetId = "ab2a5b66-a3c2-47de-87ca-9809d9db8f81";
 const sourceId = "1bb5771e-9537-4d27-a61b-d1180d41351d";
@@ -57,6 +59,25 @@ function fakes() {
 }
 
 describe("createImportAsset", () => {
+  it("stores an uploaded ZIP byte-for-byte with its extracted source files and hash", async () => {
+    const deps = fakes();
+    const archive: ImportFile = { relativePath: "bundle.zip", bytes: zipSync({ "folder/triangle.gltf": model.bytes, "folder/triangle.bin": binary.bytes }) };
+    const original = new Uint8Array(archive.bytes);
+    const importAsset = createImportAsset({ ...deps, buildManifest: buildImportManifest, createId: () => "import-1" });
+
+    await importAsset({ ownerId: "owner-1", name: "Triangle", entries: [archive] });
+
+    const stored = deps.files.get(`assets/${assetId}/source/bundle.zip`);
+    expect(stored).toEqual(original);
+    expect(archive.bytes).toEqual(original);
+    expect(deps.getComplete()?.files).toContainEqual(expect.objectContaining({
+      relativePath: "bundle.zip", storageKey: `assets/${assetId}/source/bundle.zip`,
+      byteSize: original.byteLength, sha256: createHash("sha256").update(original).digest("hex"),
+      mimeType: "application/zip", role: "source",
+    }));
+    expect(deps.files.get(`assets/${assetId}/source/folder/triangle.gltf`)).toEqual(model.bytes);
+  });
+
   it("stores an OBJ source beside a normalized GLB and analyzes the normalized file", async () => {
     const deps = fakes();
     const obj: ImportFile = { relativePath: "folder/triangle.obj", bytes: new TextEncoder().encode("v 0 0 0\n") };

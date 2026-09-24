@@ -57,4 +57,24 @@ describe("GET /api/assets/:assetId/file", () => {
     const invalid = await handler(new Request(url(key), { headers: { range: "bytes=100-200" } }), params);
     expect(invalid.status).toBe(416);
   });
+
+  it("streams a retained source ZIP only through the owning asset", async () => {
+    const { storage, asset } = await fixture();
+    const key = parseStorageKey("assets/asset-1/source/bundle.zip");
+    const bytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 1, 2, 3]);
+    await storage.put(key, bytes);
+    asset.files.push({ relativePath: "bundle.zip", storageKey: key, byteSize: bytes.length, sha256: "hash", mimeType: "application/zip", role: "source" });
+    const handler = createFileHandler({
+      getSession: async (headers) => ({ user: { id: headers.get("x-test-owner") ?? "owner" } }),
+      getAsset: async (_id, ownerId) => ownerId === asset.ownerId ? asset : null,
+      storage,
+    });
+
+    const owner = await handler(new Request(url(key)), params);
+    expect(owner.status).toBe(200);
+    expect(owner.headers.get("content-type")).toBe("application/zip");
+    expect(new Uint8Array(await owner.arrayBuffer())).toEqual(bytes);
+    const other = await handler(new Request(url(key), { headers: { "x-test-owner": "other" } }), params);
+    expect(other.status).toBe(404);
+  });
 });

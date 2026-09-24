@@ -14,7 +14,7 @@ export type ImportAssetResult = { assetId: string; sourceId: string; analysis: A
 const MIME: Record<string, string> = {
   gltf: "model/gltf+json", glb: "model/gltf-binary", fbx: "application/octet-stream", obj: "text/plain", mtl: "text/plain", bin: "application/octet-stream",
   png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", ktx2: "image/ktx2",
-  txt: "text/plain", md: "text/markdown",
+  txt: "text/plain", md: "text/markdown", zip: "application/zip",
 };
 
 function fileRecord(file: ImportFile, prefix: string, role: StoredAssetFile["role"]): StoredAssetFile {
@@ -41,7 +41,7 @@ export function createImportAsset(deps: {
     const manifest = await deps.buildManifest(request.entries);
     const importId = deps.createId();
     const stagedPrefix = parseStorageKey(`staging/${importId}`);
-    const sourceFiles = [manifest.primaryModel, ...manifest.dependencies, ...manifest.attributionFiles];
+    const sourceFiles = [manifest.primaryModel, ...manifest.dependencies, ...manifest.attributionFiles, ...(manifest.archive ? [manifest.archive] : [])];
     const sourceExtension = manifest.primaryModel.relativePath.slice(manifest.primaryModel.relativePath.lastIndexOf(".") + 1).toLowerCase();
     let analysisFile = manifest.primaryModel;
     let conversionWarnings: Array<{ code: string; message: string }> = [];
@@ -69,6 +69,7 @@ export function createImportAsset(deps: {
         fileRecord(manifest.primaryModel, finalPrefix, converted ? "source" : "model"),
         ...manifest.dependencies.map((file) => fileRecord(file, finalPrefix, "dependency")),
         ...manifest.attributionFiles.map((file) => fileRecord(file, finalPrefix, "attribution")),
+        ...(manifest.archive ? [fileRecord(manifest.archive, finalPrefix, "source")] : []),
         ...(converted ? [fileRecord(converted, finalPrefix, "model")] : []),
       ];
       await deps.storage.commitTree(stagedPrefix, finalPrefix);
