@@ -104,6 +104,24 @@ describe("buildImportManifest", () => {
     ])).rejects.toMatchObject({ code: "MISSING_DEPENDENCY", message: /missing\.mtl/ });
   });
 
+  it("names a missing OBJ texture without changing the source package", async () => {
+    const entries = [
+      file("scene/model.obj", bytes("mtllib model.mtl\nv 0 0 0\nf 1 1 1\n")),
+      file("scene/model.mtl", bytes("newmtl paint\nmap_Kd missing.png\n")),
+    ];
+    const originals = entries.map((entry) => new Uint8Array(entry.bytes));
+    await expect(buildImportManifest(entries)).rejects.toMatchObject({ code: "MISSING_DEPENDENCY", message: /scene\/missing\.png/ });
+    expect(entries.map((entry) => entry.bytes)).toEqual(originals);
+  });
+
+  it("rejects malformed OBJ and FBX without changing their source bytes", async () => {
+    for (const entry of [file("broken.obj", bytes("this is not geometry")), file("broken.fbx", bytes("this is not FBX"))]) {
+      const original = new Uint8Array(entry.bytes);
+      await expect(buildImportManifest([entry])).rejects.toMatchObject({ code: "INVALID_FILE", message: expect.stringContaining(entry.relativePath) });
+      expect(entry.bytes).toEqual(original);
+    }
+  });
+
   it("accepts a legal binary FBX signature", async () => {
     const header = new TextEncoder().encode("Kaydara FBX Binary  \\0");
     const result = await buildImportManifest([file("model.fbx", header)]);

@@ -4,7 +4,7 @@ Last checked: 2026-09-24
 
 ## Current status
 
-Phase 1 remains planned. No task is marked complete because the acceptance checks requiring a real-package browser import, persisted resumable jobs, variant selection, and isolated database evidence are not all satisfied yet.
+Phase 1 is in progress. Task 1.1 is accepted using the committed CC0 fixtures and an isolated PostgreSQL owner browser run. Tasks 1.2–1.4 remain open for bounded package handling, persisted resumable jobs, variant selection, and restart recovery.
 
 ## Implemented evidence
 
@@ -48,7 +48,7 @@ Focused fixture verification on 2026-09-24:
 
 ## Remaining acceptance gaps
 
-- Need the FBX and OBJ+MTL+texture browser import/reopen check using isolated synthetic owner data. Broader licensed exporter samples are still needed before claiming format-wide fidelity.
+- Broader licensed FBX exporter samples are still needed before claiming format-wide fidelity; the Task 1.1 gate covers the current documented parser boundary.
 - Need route/UI integration for persisted job progress, cancellation, retry, and explicit variant selection.
 - Need a database migration and isolated end-to-end recovery run proving source hashes and incomplete-vs-complete states.
 - Existing GLTF/GLB path is covered by the current unit and smoke suites, but the full Phase 1 acceptance suite is not yet present.
@@ -61,3 +61,11 @@ Focused fixture verification on 2026-09-24:
 - Extended `e2e/import-flow.spec.ts` to import both fixtures through the owner browser, inspect triangle counts and fidelity warnings, wait for the viewer, retrieve byte-identical source files and normalized GLBs through the protected route, deny an anonymous file request, and reopen each asset after page reload. The test requires `YGGDRASIL_E2E_DATABASE_URL` distinct from `DATABASE_URL` and an empty migrated PostgreSQL database.
 - `pnpm test:e2e`: smoke passed; the owner workflow, including the new FBX/OBJ browser steps, was skipped because no isolated PostgreSQL URL was configured. Docker and `pg_ctl` were also unavailable. The browser import/reopen gate is **unverified**, so Task 1.1 and Phase 1 remain open. The fixtures cover the current parser boundary but do not represent the range of FBX exporter features.
 - Final checks: `pnpm test` passed (23 files, 135 passed, 1 skipped); `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `git diff --check` passed. `graphify update .` completed with `PYTHONHASHSEED=0` and refreshed the ignored graph output; it skipped the model fixture formats because they are not classified as graph code or documents. Ponytail review found no further removable complexity after replacing the duplicated inline converter cases.
+
+## Task 1.1 isolated PostgreSQL browser acceptance — 2026-09-24
+
+- Installed PostgreSQL 18.4 binaries into `%TEMP%/yggdrasil-pg-gate`, initialized a dedicated loopback cluster on port 55479, and created an empty `yggdrasil_e2e` database. No repository dependency or configured owner database/storage was changed. `YGGDRASIL_E2E_DATABASE_URL` pointed only to this temporary database; `DATABASE_URL` was set to that URL only for migration.
+- `pnpm db:migrate`: all Drizzle migrations applied successfully with the real `pg` driver. The Playwright `beforeAll` empty-database assertion then passed; a nonempty owner/assets database would have stopped the test.
+- `pnpm test:e2e -- e2e/import-flow.spec.ts`: **2 passed, 0 skipped**. The owner workflow created a throwaway owner, imported the generated glTF model, exercised normalization, failed promotion, revert, retry and reload, then imported the committed CC0 FBX cube and OBJ+MTL+PNG package. It checked the expected triangle counts, explicit conversion warnings, live viewer after reload, retained original bytes, normalized GLB headers, and anonymous file denial. The E2E teardown deleted only the throwaway owner and guarded temp asset root.
+- Focused manifest/converter/import-route checks: **3 files, 37 passed**, including missing OBJ texture path, malformed OBJ/FBX, unchanged failure inputs, and anonymous import denial. Final full checks: `pnpm test` **23 files, 137 passed, 1 optional private fixture skipped**; `pnpm test:e2e` **2 passed, 0 skipped**; `pnpm lint`, `pnpm typecheck`, and `pnpm build` exited 0. Lint was rerun sequentially after an initial parallel run raced Playwright's `test-results` cleanup. The optional Mega Wyvern check remains unverified without its private local fixture.
+- Scope: the FBX fixture exercises the supported ASCII geometry path; animation, skeleton, and exporter-specific FBX fidelity still need broader samples. Large-package memory bounds, persistent jobs, variants, and process-restart recovery remain Tasks 1.2–1.4.
