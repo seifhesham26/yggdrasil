@@ -23,6 +23,12 @@ Phase 1 remains planned. No task is marked complete because the acceptance check
 - Server-side conversion uses the official Three.js `OBJLoader`, `FBXLoader`, and `GLTFExporter` boundary. Converted models are stored under `__normalized/`; source files remain separately retained and are hashed before promotion.
 - OBJ material conversion and FBX fidelity limitations are explicit warnings.
 
+Focused fixture verification on 2026-09-24:
+
+- `pnpm test -- src/features/assets/infrastructure/model-converter.test.ts src/features/assets/infrastructure/import-manifest.test.ts src/features/assets/application/import-asset.test.ts`: 23 test files passed, 133 tests passed, 1 optional private-fixture test skipped.
+- Generated ASCII FBX and OBJ+MTL+PNG fixtures reopen through the existing conversion boundary, produce GLB output, retain explicit fidelity warnings, and leave source bytes unchanged.
+- The focused check does not close the legal redistribution fixture, persisted owner database, browser import/reopen, or external restart gates below.
+
 ## Task 1.2/1.3 work
 
 - `runImportJob` records byte progress and safe phase checkpoints, resumes without restaging completed files, and cleans up on cancellation/failure.
