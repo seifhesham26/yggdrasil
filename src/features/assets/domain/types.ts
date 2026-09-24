@@ -1,6 +1,7 @@
 export type ImportFile = { relativePath: string; bytes: Uint8Array };
 export type FileBackedImportFile = { relativePath: string; path: string; byteSize: number; sha256: string };
 export type ImportSource = ImportFile | FileBackedImportFile;
+export type ImportJobFile = { relativePath: string; storageKey: string; byteSize: number; sha256: string };
 
 export type ImportManifest<T extends ImportSource = ImportFile> = {
   primaryModel: T;

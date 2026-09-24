@@ -1,11 +1,12 @@
-import { bigint, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { user } from "./auth";
-import type { AssetAnalysis } from "@/features/assets/domain/types";
+import type { AssetAnalysis, ImportJobFile } from "@/features/assets/domain/types";
 
 export const assetStatus = pgEnum("asset_status", ["importing", "ready", "failed"]);
 export const assetFileRole = pgEnum("asset_file_role", ["model", "source", "dependency", "attribution"]);
 export const assetVersionKind = pgEnum("asset_version_kind", ["original", "optimized", "converted"]);
 export const optimizationOperationStatus = pgEnum("optimization_operation_status", ["approved", "running", "succeeded", "failed", "canceled"]);
+export const importJobPhase = pgEnum("import_job_phase", ["received", "staging", "analyzing", "committing", "completed", "cancelled", "failed"]);
 
 export const assets = pgTable("assets", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -17,6 +18,24 @@ export const assets = pgTable("assets", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   currentVersionId: uuid("current_version_id"),
 }, (table) => [index("assets_owner_created_idx").on(table.ownerId, table.createdAt)]);
+
+export const importJobs = pgTable("import_jobs", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  ownerId: text("owner_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  uploadPrefix: text("upload_prefix").notNull(),
+  files: jsonb("files").$type<ImportJobFile[]>().notNull(),
+  phase: importJobPhase("phase").default("received").notNull(),
+  nextFile: integer("next_file").default(0).notNull(),
+  processedBytes: bigint("processed_bytes", { mode: "number" }).default(0).notNull(),
+  totalBytes: bigint("total_bytes", { mode: "number" }).notNull(),
+  cancelRequested: boolean("cancel_requested").default(false).notNull(),
+  errorCode: text("error_code"),
+  assetId: uuid("asset_id"),
+  leaseUntil: timestamp("lease_until", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [index("import_jobs_owner_phase_idx").on(table.ownerId, table.phase)]);
 
 export const assetSources = pgTable("asset_sources", {
   id: uuid("id").defaultRandom().primaryKey(),
