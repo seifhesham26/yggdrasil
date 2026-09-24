@@ -4,6 +4,8 @@
 
 Goal: explain web-performance risks and offer owner-approved, non-destructive improvements. No optimization runs automatically on import.
 
+Review fixes are implemented and verified with generated fixtures, embedded PostgreSQL, real route wiring and component tests. The authenticated browser workflow and external PostgreSQL restart gate remain open. See [the current evidence and limitations](EVIDENCE.md).
+
 - [ ] [2.1 — Findings and recommendations](01-recommendations.md)
 - [ ] [2.2 — Derived asset versions](02-versions.md)
 - [ ] [2.3 — Optimization operations](03-operations.md)

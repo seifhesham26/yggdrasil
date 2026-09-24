@@ -1,36 +1,55 @@
 # Phase 2 optimization evidence
 
-Last checked: 2026-09-23
+Last checked: 2026-09-24. **Phase acceptance remains open.**
 
-## Scope and safety
+## Verified scope
 
-Phase 2 is in progress. All optimization fixtures use generated glTF bytes and temporary directories under the operating system temp folder. No original upload, configured storage root, database owner, or private fixture is modified.
+Fixtures use generated glTF bytes, guarded temporary storage, and an embedded PostgreSQL engine (PGlite) migrated with the project's real SQL migrations. No configured database, owner account, source upload, private model, or configured storage root was modified.
 
-## Task 2.1 — Findings and recommendations
+The adapter tests execute real Drizzle queries, PostgreSQL constraints, transactions and failure triggers. The route wiring tests import the actual GET/POST/PATCH and file route exports. Only their database connection, authenticated session and storage configuration are substituted; the repository, persistence adapter, processors, analyzer and storage are real. This is not a test of the production node-postgres connection or Neon service.
 
-- `pnpm test -- --run src/features/assets/domain/optimization.test.ts src/app/api/assets/[assetId]/optimization/route.test.ts`: deterministic findings, explicit `no-recommendations`, unsupported-operation warnings, and owner-scoped access passed.
-- Estimates are labeled `estimate`; no measured saving is reported before output generation.
-- Thresholds currently covered by the rules: textures over 4096 pixels and triangle counts over 250,000. Required unsupported extensions disable normalization.
+## Findings and recommendations
 
-## Task 2.2 — Derived versions
+- Normalization is disabled for incomplete material images, error-level analysis findings, and extensions outside the tested rewrite allowlist. Core glTF, `KHR_materials_unlit` and `KHR_materials_clearcoat` are eligible. Other extensions can still be inspected, but optimization is blocked with a compatibility explanation.
+- Controls display the recommendation, quality risk and estimated savings before approval. Comparison metrics are measured file bytes and analysis counts, not estimates.
+- Resizing textures, compressing geometry and producing lower-detail geometry remain explicitly unsupported. Their rejection paths are tested; no positive implementation is claimed.
 
-- `ReversibleOptimizationHistory` creates a new version with parent ID, output SHA-256, byte size, analysis snapshot, and operation metadata.
-- Failed processing removes only the derived version tree; the prior version remains selected. Database schema and migration add `current_version_id`, version lineage, findings, and operation records.
-- Database-backed restart/reopen verification is not yet complete, so Task 2.2 remains unchecked.
+## Derived versions and recovery
 
-## Task 2.3 — Operations
+- Promotion validates the owner and retained parent while holding an asset row lock, then saves version, analysis, success attempt, operation linkage and current selection in one transaction.
+- PostgreSQL trigger tests fail each of those five writes. Every rollback leaves only the original retained/current version, records a failed attempt, removes the unreferenced output, and preserves source bytes.
+- Lost commit acknowledgement is reconciled before deleting output. A committed version and its binary survive. If reconciliation cannot reach the database, protected output is deliberately retained; automatic orphan reconciliation during a database outage is not implemented.
+- Initial selection reuses the imported original ID in a transaction when an upgraded asset has null selection. No second original is synthesized; migration 0004 is unchanged. New imports select their original inside the import transaction.
+- Revert waits for the saved selection before updating memory or acknowledging HTTP success. Cross-owner, cross-asset, nonexistent and partial versions cannot be selected.
+- Retry uses the recorded parent and settings, including after revert and fresh-instance reload; its `retryOf` relationship and actual output ID round trip through SQL.
+- Reload preserves original identity and both supported operation names. Repeated reload does not duplicate attempts.
 
-- `processOptimization` supports deterministic prune/dedup normalization and reopens the generated GLB through the existing analyzer.
-- Geometry compression, texture resizing, and lower-detail simplification return an explicit unsupported error; no unsafe action is exposed.
-- Full operation coverage and production operation persistence remain open.
+## Selected version, protected access and UI
 
-## Task 2.4 — Comparison, history, and recovery
+- Retained version rows supply the manifest for derived single-file GLBs. The existing private file route authorizes them through the owning asset; source files and dependencies remain retained separately. Cross-owner access returns 404; unauthenticated access returns 401.
+- The asset repository resolves selected preview file, byte size and analysis from the same saved version. The report refreshes and remounts its viewer after apply/revert. Library metrics follow selection too.
+- Controls show the current version, operation outcomes, measured comparison table and a separate comparison preview. Failed HTTP and network requests report errors and release the busy state.
+- Supported processor fixtures preserve required material extensions, base color, clearcoat parameters and animation. Unknown optional/required extensions and missing images are rejected. Outputs are reopened and reanalyzed before promotion.
 
-- Temporary-storage tests prove lineage, measured output metrics, owner checks, failed-attempt visibility, and revert without deleting later history.
-- Browser apply/compare/revert/reopen coverage and production UI controls remain open.
+## Executed checks
 
-## Verification
+| Command | Result |
+| --- | --- |
+| `rtk proxy pnpm test` | 23 files passed; **131 tests passed, 1 skipped** |
+| `rtk proxy pnpm exec tsc --noEmit --incremental false` | Passed |
+| `rtk proxy pnpm lint` | Passed |
+| `rtk proxy pnpm build` | Passed (Next.js 16.3.5) |
+| `rtk proxy pnpm test:e2e` | **1 smoke passed, 1 owner workflow skipped** |
+| `rtk git diff --check` | Passed |
 
-- `pnpm test`: 19 files, 92 passed, 1 skipped.
-- `pnpm typecheck`: passed.
-- `pnpm lint`: passed.
+The skipped unit test is the optional private Mega Wyvern fixture (`YGGDRASIL_PRIVATE_FIXTURE_DIR` is not configured). The suite emits the existing Three.js CommonJS deprecation warning. Playwright emits color-environment warnings.
+
+Focused red/green runs covered adapter rollback/backfill/provenance, delayed selection, recorded-parent retry, material fidelity, actual route wiring and UI error recovery. The final full suite includes these tests.
+
+Graph refresh completed through the installed Python module with `PYTHONHASHSEED=0` after the Windows launcher failed: 682 nodes, 1,377 edges. Graphify reports a missing optional SQL parser; this does not affect executed migration/SQL tests.
+
+## Acceptance still required
+
+`e2e/import-flow.spec.ts` now contains the full owner import/apply/compare/failed-promotion/revert/retry/reopen workflow, source-byte verification, derived file fetches and viewer-version assertions. It requires an explicitly configured **empty, isolated** `YGGDRASIL_E2E_DATABASE_URL`, all migrations applied, and a PostgreSQL role able to create the temporary failure trigger. It was skipped here because that variable is unset; the main database opt-in is also unset. It is a present but unexecuted acceptance test, not a missing test or a passing workflow.
+
+The external PostgreSQL/Neon driver, process-restart durability and authenticated browser workflow remain unverified. Embedded PostgreSQL and route/component tests do not close those gates. No commit was made; coordinator review and commit remain pending.

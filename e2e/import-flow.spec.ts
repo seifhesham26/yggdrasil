@@ -46,7 +46,7 @@ test.afterAll(async () => {
   }
 });
 
-test("owner imports an animated glTF and inspects its live report", async ({ page }) => {
+test("owner imports, applies, compares, reverts, retries, and reopens optimization", async ({ page }) => {
   test.skip(!email || !name || !password || !databaseUrl, "Set YGGDRASIL_E2E_DATABASE_URL or YGGDRASIL_E2E_USE_MAIN_DATABASE=1");
   test.setTimeout(120_000);
 
@@ -75,4 +75,72 @@ test("owner imports an animated glTF and inspects its live report", async ({ pag
   await page.getByRole("link", { name: "Open asset report" }).click();
   await expect(page.getByRole("img", { name: "3D model preview" })).toBeVisible();
   await expect(page.getByText("No destructive changes applied", { exact: false })).toBeVisible();
+
+  const assetId = new URL(page.url()).pathname.split("/").at(-1)!;
+  const endpoint = `/api/assets/${assetId}/optimization`;
+  const initial = await (await page.request.get(`${endpoint}?view=history`)).json();
+  const original = initial.versions[0];
+  const sourceURL = `/api/assets/${assetId}/file?key=${encodeURIComponent(original.storageKey)}`;
+  const sourceBefore = await (await page.request.get(sourceURL)).body();
+  const preview = page.getByRole("region", { name: "Model preview", exact: true });
+  await expect(preview).toHaveAttribute("data-version-id", original.id);
+  await expect(page.getByText(/Quality risk: low/)).toBeVisible();
+  const appliedResponse = page.waitForResponse((candidate) => candidate.url().endsWith(endpoint) && candidate.request().method() === "POST");
+  await page.getByRole("button", { name: "Approve normalization" }).click();
+  const applied = await appliedResponse;
+  expect(applied.status(), await applied.text()).toBe(200);
+  const derived = await applied.json();
+  await expect(preview).toHaveAttribute("data-version-id", derived.id);
+  await expect(preview.getByRole("img", { name: "3D model preview" })).toBeVisible();
+  const derivedURL = `/api/assets/${assetId}/file?key=${encodeURIComponent(derived.storageKey)}`;
+  const derivedFile = await page.request.get(derivedURL);
+  expect(derivedFile.status()).toBe(200);
+  expect((await derivedFile.body()).length).toBe(derived.byteSize);
+  await page.getByLabel("Compare with").selectOption(original.id);
+  await expect(page.getByRole("table", { name: "Version comparison" })).toContainText(derived.byteSize.toLocaleString());
+  await expect(page.getByRole("region", { name: "Comparison preview" }).getByRole("img", { name: "3D model preview" })).toBeVisible();
+
+  // Cause one real transactional failure only for this throwaway asset. Restore
+  // the database before retry, without changing any source or retained binary.
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    await client.query(`CREATE FUNCTION e2e_fail_promotion() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+      IF NEW.asset_id = '${assetId}'::uuid THEN RAISE EXCEPTION 'E2E temporary promotion failure'; END IF;
+      RETURN NEW; END $$;
+      CREATE TRIGGER e2e_fail_promotion BEFORE INSERT ON scene_analyses FOR EACH ROW EXECUTE FUNCTION e2e_fail_promotion();`);
+    const failedResponse = page.waitForResponse((candidate) => candidate.url().endsWith(endpoint) && candidate.request().method() === "POST");
+    await page.getByRole("button", { name: "Approve normalization" }).click();
+    expect((await failedResponse).status()).toBe(422);
+    await expect(page.getByRole("button", { name: "Retry last failed operation" })).toBeVisible();
+  } finally {
+    await client.query("DROP TRIGGER IF EXISTS e2e_fail_promotion ON scene_analyses; DROP FUNCTION IF EXISTS e2e_fail_promotion();");
+    await client.end();
+  }
+  const afterFailure = await (await page.request.get(`${endpoint}?view=history`)).json();
+  expect(afterFailure.currentVersionId).toBe(derived.id);
+  expect(afterFailure.versions).toHaveLength(2);
+  const failedAttempt = afterFailure.attempts.at(-1);
+  expect(failedAttempt).toMatchObject({ status: "failed", parentVersionId: derived.id });
+
+  const versions = page.getByRole("list", { name: "Optimization version history" });
+  await versions.getByRole("listitem").filter({ hasText: "original" }).getByRole("button", { name: "Use this version" }).click();
+  await expect(preview).toHaveAttribute("data-version-id", original.id);
+  await page.reload();
+  await expect(preview).toHaveAttribute("data-version-id", original.id);
+  await expect(versions.getByRole("listitem")).toHaveCount(2);
+  const retryResponse = page.waitForResponse((candidate) => candidate.url().endsWith(endpoint) && candidate.request().method() === "POST");
+  await page.getByRole("button", { name: "Retry last failed operation" }).click();
+  const retry = await retryResponse;
+  expect(retry.status(), await retry.text()).toBe(200);
+  const retried = await retry.json();
+  expect(retried.parentVersionId).toBe(derived.id);
+  await expect(preview).toHaveAttribute("data-version-id", retried.id);
+  await page.reload();
+  await expect(preview).toHaveAttribute("data-version-id", retried.id);
+  await expect(versions.getByRole("listitem")).toHaveCount(3);
+  const finalHistory = await (await page.request.get(`${endpoint}?view=history`)).json();
+  expect(finalHistory.attempts.at(-1)).toMatchObject({ retryOf: failedAttempt.id, versionId: retried.id, status: "succeeded" });
+  expect(await (await page.request.get(sourceURL)).body()).toEqual(sourceBefore);
+  expect((await page.request.get(derivedURL)).status()).toBe(200);
 });
