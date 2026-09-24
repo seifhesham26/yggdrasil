@@ -5,7 +5,7 @@
 Goal: reliably ingest FBX, OBJ, large folders/ZIPs, and model variants while preserving originals and provenance. Work through the tasks in order:
 
 - [x] [1.1 — FBX and OBJ ingestion](01-fbx-obj.md)
-- [ ] [1.2 — Large-package streaming and jobs](02-large-packages.md)
+- [x] [1.2 — Large-package streaming and jobs](02-large-packages.md)
 - [ ] [1.3 — Variants and attribution](03-variants-attribution.md)
 - [ ] [1.4 — Import integration and recovery](04-integration.md)
 

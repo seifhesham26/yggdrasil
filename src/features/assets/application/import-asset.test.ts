@@ -63,6 +63,44 @@ function fakes() {
 }
 
 describe("createImportAsset", () => {
+  it("finishes the same asset after a process stops just after source-tree promotion", async () => {
+    const deps = fakes();
+    deps.files.set(`assets/${assetId}/source/${model.relativePath}`, new Uint8Array(model.bytes));
+    deps.files.set(`assets/${assetId}/source/${binary.relativePath}`, new Uint8Array(binary.bytes));
+    deps.analyze.mockImplementationOnce(async (_storage, key) => {
+      expect(key).toBe(`assets/${assetId}/source/${model.relativePath}`);
+      return analysis;
+    });
+    const importAsset = createImportAsset({ ...deps, createId: () => "unused" });
+    const result = await importAsset({ ownerId: "owner-1", name: "Triangle", assetId, entries: [model, binary] });
+    expect(result.assetId).toBe(assetId);
+    expect(deps.getComplete()?.files).toHaveLength(2);
+    expect(deps.events).not.toContainEqual(expect.stringMatching(/^put:|^commit:/));
+    expect(deps.files.get(`assets/${assetId}/source/${model.relativePath}`)).toEqual(model.bytes);
+  });
+
+  it("returns an already completed job asset without staging another copy", async () => {
+    const deps = fakes();
+    deps.repository.getAsset = async () => ({
+      id: assetId, ownerId: "owner-1", name: "Triangle", status: "ready", errorCode: null,
+      createdAt: new Date(), updatedAt: new Date(), byteSize: model.bytes.length,
+      format: "glTF", counts: { meshes: 1, triangles: 1, animations: 1 }, files: [], analysis,
+    });
+    const importAsset = createImportAsset({ ...deps, createId: () => "unused" });
+    await expect(importAsset({ ownerId: "owner-1", name: "Triangle", assetId, entries: [model] })).resolves.toMatchObject({ assetId, analysis });
+    expect(deps.events).not.toContainEqual(expect.stringMatching(/^put:|^commit:|^complete$/));
+  });
+
+  it("reports staged bytes and stops before promotion when cancellation is requested", async () => {
+    const deps = fakes();
+    const progress = vi.fn(async () => {});
+    let checks = 0;
+    const importAsset = createImportAsset({ ...deps, createId: () => "import-1", reportProgress: progress, isCancelled: async () => ++checks >= 4 });
+    await expect(importAsset({ ownerId: "owner-1", name: "Triangle", entries: [model, binary] })).rejects.toMatchObject({ code: "IMPORT_CANCELLED" });
+    expect(progress).toHaveBeenCalledWith(expect.objectContaining({ phase: "staging", processedBytes: model.bytes.length, totalBytes: model.bytes.length + binary.bytes.length }));
+    expect(deps.events).not.toContainEqual(expect.stringMatching(/^commit:/));
+    expect(deps.files.size).toBe(0);
+  });
   it("imports file-backed sources without replacing their original bytes", async () => {
     const root = await mkdtemp(join(tmpdir(), "yggdrasil-file-import-test-"));
     try {

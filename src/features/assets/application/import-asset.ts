@@ -8,7 +8,7 @@ import { readImportBytes } from "../infrastructure/import-manifest";
 import { convertModelToGlb } from "../infrastructure/model-converter";
 import type { AssetRepository, StoredAssetFile } from "../infrastructure/asset-repository";
 
-export type ImportAssetRequest = { ownerId: string; name: string; entries: ImportSource[] };
+export type ImportAssetRequest = { ownerId: string; name: string; entries: ImportSource[]; assetId?: string };
 export type ImportAssetResult = { assetId: string; sourceId: string; analysis: AssetAnalysis };
 
 const MIME: Record<string, string> = {
@@ -36,10 +36,12 @@ export function createImportAsset(deps: {
   analyze: typeof analyzeGltf;
   convert?: typeof convertModelToGlb;
   createId: () => string;
+  reportProgress?: (progress: { phase: "staging" | "analyzing" | "committing"; nextFile: number; processedBytes: number; totalBytes: number }) => Promise<void>;
+  isCancelled?: () => Promise<boolean>;
 }) {
   return async function importAsset(request: ImportAssetRequest): Promise<ImportAssetResult> {
     const manifest = await deps.buildManifest(request.entries);
-    const importId = deps.createId();
+    const importId = request.assetId ?? deps.createId();
     const stagedPrefix = parseStorageKey(`staging/${importId}`);
     const sourceFiles = [manifest.primaryModel, ...manifest.dependencies, ...manifest.attributionFiles, ...(manifest.archive ? [manifest.archive] : [])];
     const sourceExtension = manifest.primaryModel.relativePath.slice(manifest.primaryModel.relativePath.lastIndexOf(".") + 1).toLowerCase();
@@ -54,31 +56,68 @@ export function createImportAsset(deps: {
       conversionWarnings = result.warnings;
     }
     const files = [...sourceFiles, ...(converted ? [converted] : [])];
-    const created = await deps.repository.createImport({ ownerId: request.ownerId, name: request.name });
+    const created = await deps.repository.createImport({ ownerId: request.ownerId, name: request.name, assetId: request.assetId });
     const finalPrefix = parseStorageKey(`assets/${created.assetId}/source`);
+    if (request.assetId) {
+      const existing = await deps.repository.getAsset(created.assetId, request.ownerId);
+      if (existing?.status === "ready" && existing.analysis) return { ...created, analysis: existing.analysis };
+    }
+    const records = [
+      fileRecord(manifest.primaryModel, finalPrefix, converted ? "source" : "model"),
+      ...manifest.dependencies.map((file) => fileRecord(file, finalPrefix, "dependency")),
+      ...manifest.attributionFiles.map((file) => fileRecord(file, finalPrefix, "attribution")),
+      ...(manifest.archive ? [fileRecord(manifest.archive, finalPrefix, "source")] : []),
+      ...(converted ? [fileRecord(converted, finalPrefix, "model")] : []),
+    ];
+    const finalModelKey = parseStorageKey(`${finalPrefix}/${analysisFile.relativePath}`);
     let committed = false;
+    let recoveredFinal = false;
     try {
-      for (const file of files) {
+      if (request.assetId && await deps.storage.exists(finalModelKey)) {
+        recoveredFinal = true;
+        for (const record of records) {
+          const stored = await deps.storage.read(parseStorageKey(record.storageKey));
+          const hash = createHash("sha256").update(stored).digest("hex");
+          if (record.role === "model" && converted) {
+            record.sha256 = hash;
+            record.byteSize = stored.byteLength;
+          } else if (stored.byteLength !== record.byteSize || hash !== record.sha256) {
+            throw new AssetImportError("IMPORT_FAILED", `Retained source does not match uploaded bytes: ${record.relativePath}`);
+          }
+        }
+        const reopened = await deps.analyze(deps.storage, finalModelKey);
+        const analysis = conversionWarnings.length
+          ? { ...reopened, warnings: [...reopened.warnings, ...conversionWarnings.map((warning) => ({ ...warning, severity: "warning" as const }))] }
+          : reopened;
+        await deps.repository.completeImport({ ownerId: request.ownerId, assetId: created.assetId, sourceId: created.sourceId, files: records, analysis });
+        await deps.storage.removeTree(stagedPrefix);
+        return { ...created, analysis };
+      }
+      if (request.assetId) await deps.storage.removeTree(stagedPrefix);
+      const totalBytes = files.reduce((sum, file) => sum + ("bytes" in file ? file.bytes.byteLength : file.byteSize), 0);
+      let processedBytes = 0;
+      for (const [index, file] of files.entries()) {
+        if (await deps.isCancelled?.()) throw new AssetImportError("IMPORT_CANCELLED", "Import was cancelled");
         const key = parseStorageKey(`${stagedPrefix}/${file.relativePath}`);
         if ("bytes" in file) await deps.storage.put(key, file.bytes);
         else await deps.storage.putFile(key, file.path);
+        processedBytes += "bytes" in file ? file.bytes.byteLength : file.byteSize;
+        await deps.reportProgress?.({ phase: "staging", nextFile: index + 1, processedBytes, totalBytes });
       }
+      if (await deps.isCancelled?.()) throw new AssetImportError("IMPORT_CANCELLED", "Import was cancelled");
+      await deps.reportProgress?.({ phase: "analyzing", nextFile: files.length, processedBytes, totalBytes });
       const analysisResult = await deps.analyze(deps.storage, parseStorageKey(`${stagedPrefix}/${analysisFile.relativePath}`));
       const analysis = conversionWarnings.length
         ? { ...analysisResult, warnings: [...analysisResult.warnings, ...conversionWarnings.map((warning) => ({ ...warning, severity: "warning" as const }))] }
         : analysisResult;
-      const records = [
-        fileRecord(manifest.primaryModel, finalPrefix, converted ? "source" : "model"),
-        ...manifest.dependencies.map((file) => fileRecord(file, finalPrefix, "dependency")),
-        ...manifest.attributionFiles.map((file) => fileRecord(file, finalPrefix, "attribution")),
-        ...(manifest.archive ? [fileRecord(manifest.archive, finalPrefix, "source")] : []),
-        ...(converted ? [fileRecord(converted, finalPrefix, "model")] : []),
-      ];
+      if (await deps.isCancelled?.()) throw new AssetImportError("IMPORT_CANCELLED", "Import was cancelled");
+      await deps.reportProgress?.({ phase: "committing", nextFile: files.length, processedBytes, totalBytes });
       await deps.storage.commitTree(stagedPrefix, finalPrefix);
       committed = true;
       await deps.repository.completeImport({ ownerId: request.ownerId, assetId: created.assetId, sourceId: created.sourceId, files: records, analysis });
       return { ...created, analysis };
     } catch (error) {
+      if (recoveredFinal) throw new AssetImportError("IMPORT_FAILED", "Retained source was preserved; import recovery needs attention.");
       // A dropped response can arrive after a successful DB commit. Never delete
       // its source files if the completed record is visible on a follow-up read.
       if (committed) {

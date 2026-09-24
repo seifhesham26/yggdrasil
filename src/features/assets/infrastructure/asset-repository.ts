@@ -13,7 +13,7 @@ export type StoredAssetFile = {
   role: "model" | "source" | "dependency" | "attribution";
 };
 
-export type CreateImportRecord = { ownerId: string; name: string };
+export type CreateImportRecord = { ownerId: string; name: string; assetId?: string };
 export type CompleteImportRecord = {
   ownerId: string;
   assetId: string;
@@ -53,7 +53,18 @@ export interface AssetRepository {
 export class DrizzleAssetRepository implements AssetRepository {
   async createImport(input: CreateImportRecord): Promise<{ assetId: string; sourceId: string }> {
     return db.transaction(async (tx) => {
-      const [asset] = await tx.insert(assets).values({ ownerId: input.ownerId, name: input.name }).returning({ id: assets.id });
+      if (input.assetId) {
+        const [existing] = await tx.select({ id: assets.id, ownerId: assets.ownerId, status: assets.status })
+          .from(assets).where(eq(assets.id, input.assetId)).limit(1);
+        if (existing) {
+          if (existing.ownerId !== input.ownerId) throw new Error("Import belongs to another owner");
+          const [source] = await tx.select({ id: assetSources.id }).from(assetSources).where(eq(assetSources.assetId, existing.id)).limit(1);
+          if (!source) throw new Error("Import source record is missing");
+          if (existing.status === "failed") await tx.update(assets).set({ status: "importing", errorCode: null, updatedAt: new Date() }).where(eq(assets.id, existing.id));
+          return { assetId: existing.id, sourceId: source.id };
+        }
+      }
+      const [asset] = await tx.insert(assets).values({ id: input.assetId, ownerId: input.ownerId, name: input.name }).returning({ id: assets.id });
       const [source] = await tx.insert(assetSources).values({ assetId: asset.id, storageKey: `assets/${asset.id}/source` }).returning({ id: assetSources.id });
       return { assetId: asset.id, sourceId: source.id };
     });

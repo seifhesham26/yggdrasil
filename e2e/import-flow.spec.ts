@@ -66,10 +66,10 @@ test("owner imports models, reopens previews, and completes optimization workflo
     { name: binary.relativePath, mimeType: "application/octet-stream", buffer: Buffer.from(binary.bytes) },
   ]);
   const [response] = await Promise.all([
-    page.waitForResponse((candidate) => candidate.url().endsWith("/api/assets/import")),
+    page.waitForResponse((candidate) => candidate.url().endsWith("/api/assets/import/jobs")),
     page.getByRole("button", { name: "Import asset" }).click(),
   ]);
-  expect(response.status(), await response.text()).toBe(201);
+  expect(response.status(), await response.text()).toBe(202);
   await expect(page.getByText("Import complete")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("1 mesh")).toBeVisible();
   await expect(page.getByText("1 animation")).toBeVisible();
@@ -156,12 +156,13 @@ test("owner imports models, reopens previews, and completes optimization workflo
       await page.goto("/library");
       await page.getByLabel("Choose model files").setInputFiles(fixture.files.map((file) => join(fixtureDir, file)));
       const [importResponse] = await Promise.all([
-        page.waitForResponse((candidate) => candidate.url().endsWith("/api/assets/import")),
+        page.waitForResponse((candidate) => candidate.url().endsWith("/api/assets/import/jobs")),
         page.getByRole("button", { name: "Import asset" }).click(),
       ]);
-      expect(importResponse.status(), await importResponse.text()).toBe(201);
-      const { assetId: importedId } = await importResponse.json() as { assetId: string };
+      expect(importResponse.status(), await importResponse.text()).toBe(202);
+      const { jobId } = await importResponse.json() as { jobId: string };
       await expect(page.getByText("Import complete")).toBeVisible();
+      const { assetId: importedId } = await (await page.request.get(`/api/assets/import/jobs/${jobId}`)).json() as { assetId: string };
       await page.getByRole("link", { name: "Open asset report" }).click();
       await expect(page).toHaveURL(new RegExp(`/assets/${importedId}$`));
       await expect(page.locator(".analysis-counts div").filter({ hasText: "Triangles" })).toContainText(fixture.triangles);
@@ -192,11 +193,13 @@ test("owner imports models, reopens previews, and completes optimization workflo
     await page.goto("/library");
     await page.getByLabel("Choose ZIP").setInputFiles({ name: "triangle.zip", mimeType: "application/zip", buffer: Buffer.from(archive) });
     const [importResponse] = await Promise.all([
-      page.waitForResponse((candidate) => candidate.url().endsWith("/api/assets/import")),
+      page.waitForResponse((candidate) => candidate.url().endsWith("/api/assets/import/jobs")),
       page.getByRole("button", { name: "Import asset" }).click(),
     ]);
-    expect(importResponse.status(), await importResponse.text()).toBe(201);
-    const { assetId: zipAssetId } = await importResponse.json() as { assetId: string };
+    expect(importResponse.status(), await importResponse.text()).toBe(202);
+    const { jobId } = await importResponse.json() as { jobId: string };
+    await expect(page.getByText("Import complete")).toBeVisible();
+    const { assetId: zipAssetId } = await (await page.request.get(`/api/assets/import/jobs/${jobId}`)).json() as { assetId: string };
     await page.getByRole("link", { name: "Open asset report" }).click();
     await expect(page).toHaveURL(new RegExp(`/assets/${zipAssetId}$`));
     await expect(page.locator(".analysis-counts div").filter({ hasText: "Triangles" })).toContainText("1");

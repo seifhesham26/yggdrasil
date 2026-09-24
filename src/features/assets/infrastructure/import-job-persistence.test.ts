@@ -1,6 +1,8 @@
 // @vitest-environment node
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { user } from "@/db/schema/auth";
+import { importJobs } from "@/db/schema/assets";
+import { eq } from "drizzle-orm";
 import { migrateTestDatabase, ownerId, postgres, resetTestDatabase } from "@/test/optimization-database";
 import { testDb } from "@/test/optimization-database";
 import { DrizzleImportJobRepository } from "./import-job-persistence";
@@ -58,5 +60,25 @@ describe("Drizzle import job persistence", () => {
     await repo.forJob(ownerId, job.id).write({ phase: "completed", nextFile: 0, processedBytes: 0, totalBytes: 0 });
     expect(await repo.requestCancel(ownerId, job.id)).toBe(false);
     expect((await repo.get(ownerId, job.id))?.cancelRequested).toBe(false);
+  });
+
+  it("does not request cancellation after promotion has started", async () => {
+    await owner();
+    const repo = new DrizzleImportJobRepository();
+    const job = await repo.create({ ownerId, name: "Committing", uploadPrefix: "staging/upload-private", files: [], totalBytes: 0 });
+    await repo.forJob(ownerId, job.id).write({ phase: "committing", nextFile: 0, processedBytes: 0, totalBytes: 0 });
+    expect(await repo.requestCancel(ownerId, job.id)).toBe(false);
+    expect((await repo.get(ownerId, job.id))?.cancelRequested).toBe(false);
+  });
+
+  it("claims a job once and permits recovery only after its lease expires", async () => {
+    await owner();
+    const repo = new DrizzleImportJobRepository();
+    const job = await repo.create({ ownerId, name: "Recover", uploadPrefix: "staging/upload-private", files: [], totalBytes: 0 });
+    expect(await repo.claim(ownerId, job.id)).toMatchObject({ phase: "staging" });
+    expect(await repo.claim(ownerId, job.id)).toBeNull();
+    await testDb.update(importJobs).set({ leaseUntil: new Date(Date.now() - 1000) }).where(eq(importJobs.id, job.id));
+    expect(await new DrizzleImportJobRepository().claim(ownerId, job.id)).toMatchObject({ id: job.id, phase: "staging" });
+    expect(await repo.claim("another-owner", job.id)).toBeNull();
   });
 });

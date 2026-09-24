@@ -1,4 +1,4 @@
-import { and, eq, notInArray } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, notInArray, or } from "drizzle-orm";
 import { db } from "@/db/client";
 import { importJobs } from "@/db/schema/assets";
 import { parseStorageKey } from "@/lib/storage/storage-key";
@@ -24,6 +24,49 @@ export class DrizzleImportJobRepository {
     return job ?? null;
   }
 
+  async claim(ownerId: string, jobId: string): Promise<ImportJobRecord | null> {
+    const now = new Date();
+    const [job] = await db.update(importJobs).set({ phase: "staging", leaseUntil: new Date(now.getTime() + 15_000), updatedAt: now })
+      .where(and(eq(importJobs.id, jobId), eq(importJobs.ownerId, ownerId), eq(importJobs.cancelRequested, false), or(
+        eq(importJobs.phase, "received"),
+        and(inArray(importJobs.phase, ["staging", "analyzing", "committing"]), or(isNull(importJobs.leaseUntil), lt(importJobs.leaseUntil, now))),
+      ))).returning();
+    return job ?? null;
+  }
+
+  async progress(ownerId: string, jobId: string, checkpoint: ImportJobCheckpoint): Promise<void> {
+    const [job] = await db.update(importJobs).set({
+      phase: checkpoint.phase, nextFile: checkpoint.nextFile, processedBytes: checkpoint.processedBytes,
+      totalBytes: checkpoint.totalBytes, errorCode: checkpoint.errorCode ?? null,
+      leaseUntil: new Date(Date.now() + 15_000), updatedAt: new Date(),
+    }).where(and(eq(importJobs.id, jobId), eq(importJobs.ownerId, ownerId), eq(importJobs.cancelRequested, false), inArray(importJobs.phase, ["staging", "analyzing", "committing"])))
+      .returning({ id: importJobs.id });
+    if (!job) throw new Error("Import job is not active");
+  }
+
+  async heartbeat(ownerId: string, jobId: string): Promise<void> {
+    await db.update(importJobs).set({ leaseUntil: new Date(Date.now() + 15_000) })
+      .where(and(eq(importJobs.id, jobId), eq(importJobs.ownerId, ownerId), inArray(importJobs.phase, ["staging", "analyzing", "committing"])));
+  }
+
+  async complete(ownerId: string, jobId: string, assetId: string): Promise<void> {
+    const [job] = await db.update(importJobs).set({ phase: "completed", assetId, leaseUntil: null, processedBytes: importJobs.totalBytes, errorCode: null, updatedAt: new Date() })
+      .where(and(eq(importJobs.id, jobId), eq(importJobs.ownerId, ownerId), eq(importJobs.cancelRequested, false), inArray(importJobs.phase, ["staging", "analyzing", "committing"]))).returning({ id: importJobs.id });
+    if (!job) throw new Error("Import job not found");
+  }
+
+  async fail(ownerId: string, jobId: string, errorCode: string): Promise<void> {
+    const [job] = await db.update(importJobs).set({ phase: "failed", errorCode, leaseUntil: null, updatedAt: new Date() })
+      .where(and(eq(importJobs.id, jobId), eq(importJobs.ownerId, ownerId), inArray(importJobs.phase, ["staging", "analyzing", "committing"]))).returning({ id: importJobs.id });
+    if (!job) throw new Error("Import job not found");
+  }
+
+  async markCancelled(ownerId: string, jobId: string): Promise<void> {
+    const [job] = await db.update(importJobs).set({ phase: "cancelled", cancelRequested: true, leaseUntil: null, updatedAt: new Date() })
+      .where(and(eq(importJobs.id, jobId), eq(importJobs.ownerId, ownerId), eq(importJobs.cancelRequested, false), inArray(importJobs.phase, ["received", "staging", "analyzing", "failed"]))).returning({ id: importJobs.id });
+    if (!job) throw new Error("Import job cannot be cancelled");
+  }
+
   forJob(ownerId: string, jobId: string): ImportJobStore {
     return {
       read: async () => {
@@ -44,7 +87,7 @@ export class DrizzleImportJobRepository {
 
   async requestCancel(ownerId: string, jobId: string): Promise<boolean> {
     const [updated] = await db.update(importJobs).set({ cancelRequested: true, updatedAt: new Date() })
-      .where(and(eq(importJobs.id, jobId), eq(importJobs.ownerId, ownerId), notInArray(importJobs.phase, ["completed", "cancelled"]))).returning({ id: importJobs.id });
+      .where(and(eq(importJobs.id, jobId), eq(importJobs.ownerId, ownerId), eq(importJobs.cancelRequested, false), inArray(importJobs.phase, ["received", "staging", "analyzing"]))).returning({ id: importJobs.id });
     return Boolean(updated);
   }
 

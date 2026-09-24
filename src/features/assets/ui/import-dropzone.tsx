@@ -5,7 +5,9 @@ import { useRouter } from "next/navigation";
 import { ArrowUpRight, FileArchive, FolderOpen, Layers3, UploadCloud } from "lucide-react";
 
 type UploadResult = { assetId: string; status: string };
-type Upload = (files: File[], onProgress: (sent: number, total: number) => void, signal: AbortSignal) => Promise<UploadResult>;
+type Upload = (files: File[], onProgress: (sent: number, total: number) => void, signal: AbortSignal, onJob?: (jobId: string) => void) => Promise<UploadResult>;
+type JobStatus = { jobId: string; phase: string; assetId?: string | null; errorCode?: string | null; processedBytes?: number; totalBytes?: number; leaseUntil?: string | null };
+const activeJobKey = "yggdrasil.activeImportJob";
 
 const errorMessages: Record<string, string> = {
   AMBIGUOUS_PRIMARY_MODEL: "This package contains more than one model. Select one model, or import them separately.",
@@ -21,9 +23,41 @@ const errorMessages: Record<string, string> = {
   TOO_MANY_FILES: "This upload contains too many files. Split it into smaller packages.",
   INVALID_MULTIPART: "The upload was interrupted. Try again.",
   INVALID_MANIFEST: "The selected folder paths could not be read. Choose the files again.",
+  IMPORT_CANCELLED: "Import cancelled.",
 };
 
-function uploadToApi(files: File[], onProgress: (sent: number, total: number) => void, signal: AbortSignal): Promise<UploadResult> {
+async function jobRequest(url: string, options?: RequestInit): Promise<JobStatus> {
+  const response = await fetch(url, options);
+  const data = await response.json() as JobStatus & { code?: string };
+  if (!response.ok) throw Object.assign(new Error(data.code ?? "Import failed"), { code: data.code ?? "IMPORT_FAILED", status: response.status });
+  return data;
+}
+
+async function runJob(jobId: string): Promise<UploadResult> {
+  const url = `/api/assets/import/jobs/${encodeURIComponent(jobId)}`;
+  let result = await jobRequest(`${url}/run`, { method: "POST" }).catch(async (error: Error & { status?: number }) => {
+    if (error.status !== 409) throw error;
+    return jobRequest(url);
+  });
+  while (result.phase !== "completed" && result.phase !== "failed" && result.phase !== "cancelled") {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    result = await jobRequest(url);
+    if (result.phase === "received" || (result.leaseUntil && Date.parse(result.leaseUntil) < Date.now())) {
+      result = await jobRequest(`${url}/run`, { method: "POST" }).catch(async (error: Error & { status?: number }) => {
+        if (error.status !== 409) throw error;
+        return jobRequest(url);
+      });
+    }
+  }
+  if (result.phase !== "completed" || !result.assetId) {
+    if (result.phase === "cancelled") localStorage.removeItem(activeJobKey);
+    throw Object.assign(new Error(result.phase === "cancelled" ? "Import cancelled" : "Import failed"), { code: result.errorCode ?? (result.phase === "cancelled" ? "IMPORT_CANCELLED" : "IMPORT_FAILED") });
+  }
+  localStorage.removeItem(activeJobKey);
+  return { assetId: result.assetId, status: "ready" };
+}
+
+function uploadToApi(files: File[], onProgress: (sent: number, total: number) => void, signal: AbortSignal, onJob?: (jobId: string) => void): Promise<UploadResult> {
   const form = new FormData();
   for (const file of files) form.append("file", file, file.name);
   form.set("relativePath", JSON.stringify(files.map(relativePath)));
@@ -31,17 +65,21 @@ function uploadToApi(files: File[], onProgress: (sent: number, total: number) =>
     const xhr = new XMLHttpRequest();
     const abort = () => xhr.abort();
     const finish = () => signal.removeEventListener("abort", abort);
-    xhr.open("POST", "/api/assets/import");
+    xhr.open("POST", "/api/assets/import/jobs");
     xhr.upload.addEventListener("progress", (event) => {
       if (event.lengthComputable) onProgress(event.loaded, event.total);
     });
     xhr.onload = () => {
       finish();
-      let data: { assetId?: string; status?: string; code?: string; message?: string } = {};
+      let data: { jobId?: string; phase?: string; code?: string; message?: string } = {};
       try { data = JSON.parse(xhr.responseText); } catch { /* An empty or invalid response is an import failure. */ }
-      if (xhr.status < 200 || xhr.status >= 300 || !data.assetId) {
+      if (xhr.status < 200 || xhr.status >= 300 || !data.jobId) {
         reject(Object.assign(new Error(data.message ?? "Import failed"), { code: data.code ?? "IMPORT_FAILED" }));
-      } else resolve(data as UploadResult);
+      } else {
+        localStorage.setItem(activeJobKey, data.jobId);
+        onJob?.(data.jobId);
+        void runJob(data.jobId).then(resolve, reject);
+      }
     };
     xhr.onerror = () => { finish(); reject(new Error("Upload connection failed")); };
     xhr.onabort = () => { finish(); reject(new DOMException("Upload cancelled", "AbortError")); };
@@ -65,11 +103,47 @@ export function ImportDropzone({ upload = uploadToApi }: { upload?: Upload }) {
   const [progress, setProgress] = useState<{ sent: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [assetId, setAssetId] = useState<string | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [processingProgress, setProcessingProgress] = useState<JobStatus | null>(null);
 
   useEffect(() => {
     folderInput.current?.setAttribute("webkitdirectory", "");
     folderInput.current?.setAttribute("directory", "");
-  }, []);
+    if (upload !== uploadToApi) return;
+    const saved = localStorage.getItem(activeJobKey);
+    if (!saved) return;
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      setJobId(saved);
+      setPhase("processing");
+      void runJob(saved).then((result) => {
+        if (!active) return;
+        setAssetId(result.assetId);
+        setPhase("complete");
+        router.refresh();
+      }).catch((reason: unknown) => {
+        if (!active) return;
+        const code = reason && typeof reason === "object" && "code" in reason ? String(reason.code) : "IMPORT_FAILED";
+        setError(errorMessages[code] ?? errorMessages.IMPORT_FAILED);
+        setPhase("error");
+      });
+    });
+    return () => { active = false; };
+  }, [router, upload]);
+
+  useEffect(() => {
+    if (phase !== "processing" || !jobId || upload !== uploadToApi) return;
+    let active = true;
+    const update = () => {
+      void jobRequest(`/api/assets/import/jobs/${encodeURIComponent(jobId)}`).then((status) => {
+        if (active) setProcessingProgress(status);
+      }).catch(() => {});
+    };
+    update();
+    const timer = setInterval(update, 1000);
+    return () => { active = false; clearInterval(timer); };
+  }, [jobId, phase, upload]);
 
   function select(next: File[]) {
     setFiles(next);
@@ -77,6 +151,8 @@ export function ImportDropzone({ upload = uploadToApi }: { upload?: Upload }) {
     setError(null);
     setProgress(null);
     setAssetId(null);
+    setJobId(null);
+    setProcessingProgress(null);
   }
 
   async function submit() {
@@ -89,7 +165,8 @@ export function ImportDropzone({ upload = uploadToApi }: { upload?: Upload }) {
       const result = await upload(files, (sent, total) => {
         setProgress({ sent, total });
         if (total && sent >= total) setPhase("processing");
-      }, controller.current.signal);
+      }, controller.current.signal, setJobId);
+      setJobId(null);
       setAssetId(result.assetId);
       setPhase("complete");
       router.refresh();
@@ -100,6 +177,36 @@ export function ImportDropzone({ upload = uploadToApi }: { upload?: Upload }) {
       setPhase("error");
     } finally {
       controller.current = null;
+    }
+  }
+
+  async function cancelProcessing() {
+    const current = jobId ?? localStorage.getItem(activeJobKey);
+    if (!current) return;
+    try {
+      await jobRequest(`/api/assets/import/jobs/${encodeURIComponent(current)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "cancel" }) });
+      setError("Cancelling import…");
+    } catch {
+      setError("Could not cancel this import. Try again.");
+    }
+  }
+
+  async function retryJob() {
+    const current = jobId ?? localStorage.getItem(activeJobKey);
+    if (!current) return submit();
+    try {
+      await jobRequest(`/api/assets/import/jobs/${encodeURIComponent(current)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "retry" }) });
+      setError(null);
+      setPhase("processing");
+      const result = await runJob(current);
+      setAssetId(result.assetId);
+      setJobId(null);
+      setPhase("complete");
+      router.refresh();
+    } catch (reason) {
+      const code = reason && typeof reason === "object" && "code" in reason ? String(reason.code) : "IMPORT_FAILED";
+      setError(errorMessages[code] ?? errorMessages.IMPORT_FAILED);
+      setPhase("error");
     }
   }
 
@@ -146,11 +253,13 @@ export function ImportDropzone({ upload = uploadToApi }: { upload?: Upload }) {
           {phase === "empty" ? <span>Choose a model, folder, or ZIP to begin.</span> : null}
           {phase === "ready" ? <span>{files.length} {files.length === 1 ? "file" : "files"} ready · {(totalBytes / 1024 / 1024).toFixed(1)} MB</span> : null}
           {phase === "uploading" ? <span>{progress ? `Uploading ${(progress.sent / 1024 / 1024).toFixed(1)} of ${(progress.total / 1024 / 1024).toFixed(1)} MB…` : "Uploading your model…"}</span> : null}
-          {phase === "processing" ? <span>Analyzing your model…</span> : null}
+          {phase === "processing" ? <span>{processingProgress ? `${processingProgress.phase === "staging" ? "Saving files" : processingProgress.phase === "committing" ? "Finishing import" : "Analyzing model"} · ${((processingProgress.processedBytes ?? 0) / 1024 / 1024).toFixed(1)} of ${((processingProgress.totalBytes ?? 0) / 1024 / 1024).toFixed(1)} MB` : "Analyzing your model…"}</span> : null}
           {phase === "complete" ? <span className="success-message">Import complete</span> : null}
           {phase === "error" ? <span role="alert">{error}</span> : null}
         </div>
         {phase === "uploading" ? <button type="button" onClick={() => controller.current?.abort()}>Cancel upload</button> : null}
+        {phase === "processing" && upload === uploadToApi ? <button type="button" onClick={cancelProcessing}>Cancel import</button> : null}
+        {phase === "error" && jobId && upload === uploadToApi ? <button type="button" onClick={retryJob}>Retry saved import</button> : null}
         <button type="button" className="primary-button" disabled={!files.length || phase === "uploading" || phase === "processing"} onClick={submit}>
           {phase === "uploading" || phase === "processing" ? "Importing…" : "Import asset"}
           {phase === "uploading" || phase === "processing" ? null : <ArrowUpRight size={17} aria-hidden="true" />}
