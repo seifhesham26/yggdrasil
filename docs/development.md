@@ -12,13 +12,15 @@ Yggdrasil runs locally from `C:\dev\yggdrasil`. The toolchain verified for this 
 
 The import flow accepts glTF/GLB, FBX, OBJ with MTL/texture dependencies, folders, and ZIPs. FBX and OBJ are converted to web-ready GLBs; the original package is retained. OBJ materials and some FBX exporter features may not convert faithfully, so inspect the warnings in the asset report. The rest of the editing workflow is tracked in [the roadmap](roadmap/README.md).
 
-Uploads stream into protected temporary files. Current limits are 1 GiB of multipart or ZIP source bytes, 10,000 files/ZIP entries, 1 GiB of expanded ZIP content, 256 MiB per processed file, and a 100:1 declared ZIP expansion ratio. ZIP entry paths, symlinks, encryption, and actual extracted bytes are checked before an asset is made ready. The import still completes in one HTTP request; persisted background jobs and restart recovery are [Task 1.2](roadmap/phase-1-imports/02-large-packages.md) work in progress.
+Uploads stream into protected temporary files. Current limits are 1 GiB of multipart or ZIP source bytes, 10,000 files/ZIP entries, 1 GiB of expanded ZIP content, 256 MiB per processed file, and a 100:1 declared ZIP expansion ratio. ZIP entry paths, symlinks, encryption, and actual extracted bytes are checked before an asset is made ready. Persisted import jobs expose upload and processing progress, cancellation, and retry across app restarts.
 
 ## Verification
 
 Run `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm test:e2e`, and `pnpm build`. The ordinary Playwright run checks the public entry page; the import test skips unless an E2E database mode is explicitly selected.
 
 For a full browser import check, prefer a separate **empty** Neon database and set `YGGDRASIL_E2E_DATABASE_URL` in the environment. The test creates a temporary owner and asset folder and removes those test records afterward. Do not point this variable at a database containing real users or assets.
+
+On Windows, after `pnpm build`, run `pnpm exec tsx scripts/restart-import-gate.ts` with the same isolated, empty, migrated `YGGDRASIL_E2E_DATABASE_URL` to verify browser recovery across a real app process restart. The gate uses port 3210 and its own temporary asset root. It rejects a database equal to `DATABASE_URL` or one with existing users or assets.
 
 If you deliberately use the configured main database, first confirm it contains **no users or assets**, then run in PowerShell:
 

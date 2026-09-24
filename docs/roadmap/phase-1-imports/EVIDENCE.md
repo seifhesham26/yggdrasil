@@ -4,7 +4,17 @@ Last checked: 2026-09-24
 
 ## Current status
 
-Phase 1 is in progress. Task 1.1 is accepted using the committed CC0 fixtures and an isolated PostgreSQL owner browser run. Tasks 1.2–1.4 remain open for bounded package handling, persisted resumable jobs, variant selection, and restart recovery.
+Phase 1 is in progress. Tasks 1.1 and 1.2 are accepted. Task 1.3 remains open for reviewable variant resources and attribution; Task 1.4 awaits the final phase gate.
+
+## Variant selection and app restart gate — 2026-09-24
+
+- The Task 1.3 patch stores ambiguous candidate paths on a failed import job. The owner can select one candidate and retry the same job ID. The chosen path is persisted, all alternate source models and dependencies are retained, and license text is a protected attribution file. A focused Vitest run passed **4 files, 47 tests**.
+- The first isolated PostgreSQL owner browser run failed at the new variant step. The generated glTF fixture referenced `triangle.bin` but the test uploaded `model.bin` under each variant directory. Correcting the fixture paths produced **2 Playwright tests passed, 0 skipped**. The strengthened browser assertions verify persisted candidate paths, the selected `high/model.gltf` version storage key, completed job state, retained source paths, and exact license text.
+- An isolated PostgreSQL 18.4 database was created under the existing temporary test cluster and all Drizzle migrations, including `0006_variant_selection`, applied successfully. No configured owner database or asset root was used.
+- `scripts/restart-import-gate.ts` runs a built app on a separate loopback port with a throwaway owner and temporary asset root. It uploads a generated glTF package, persists the job ID in the browser, sets an expired staging checkpoint to model a stopped worker, kills the app process tree, starts a new process, and reloads the same browser session. The gate printed `RESTART_IMPORT_GATE_PASS`: the job completed on its original UUID, exactly one asset was stored, and the source SHA-256 matched the uploaded bytes. It checks that the test database is empty and separate from `DATABASE_URL` before writing; cleanup targets only its owner and validated temporary asset folder.
+- This closes browser selection and one process-restart recovery path. Task 1.3 remains open because candidate dependency sets, license/credit review before confirmation, unknown attribution display, and post-import variant switching are not yet in the owner interface. Task 1.4 and the Phase 1 gate remain open until those dependencies and final full-suite evidence are closed.
+- A focused route regression test first failed because a `null` JSON job control body threw a `TypeError`; the request now returns HTTP 400 with `INVALID_REQUEST`. The focused test passed after the fix.
+- Final checks for this increment: `pnpm test` **29 files, 171 passed, 1 optional private fixture skipped**; isolated `pnpm test:e2e` **2 passed, 0 skipped**; the separate built-app restart gate passed; `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `git diff --check` passed. `pnpm db:generate` reported **no schema changes** after adding the missing `0006_snapshot.json`; the new migration applied successfully to the isolated database. `graphify update .` rebuilt the code graph at 821 nodes and 1,766 edges; its optional SQL parser is absent, so the SQL migration was verified by Drizzle and PostgreSQL instead.
 
 ## Implemented evidence
 

@@ -1,6 +1,6 @@
 # Task 1.4 — Import integration and recovery
 
-**Status:** [ ] Planned. **Depends on:** Tasks 1.1–1.3.
+**Status:** [ ] In progress. **Depends on:** Tasks 1.1–1.3.
 
 **Outcome:** The broader import flow is usable end to end, including failure recovery, without weakening the existing GLTF/GLB path.
 
@@ -14,3 +14,5 @@
 - [ ] `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm test:e2e`, and `pnpm build` pass.
 
 **Evidence to record:** exact commands/results, known format limitations, documentation link, commit.
+
+**Current evidence:** The isolated owner Playwright flow passes for glTF, CC0 FBX and OBJ packages, ZIP source retention, and variant selection. A separate Windows gate restarts the built app with an expired staged job and verifies browser resume, one asset, and unchanged source hash. Final acceptance remains open until Task 1.3 and the Phase 1 gate close. See [evidence](EVIDENCE.md) and [local development](../../development.md).

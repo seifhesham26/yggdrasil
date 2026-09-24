@@ -57,9 +57,28 @@ describe("process import job", () => {
     const fail = vi.fn(async () => {});
     const importAsset = vi.fn();
     const process = createProcessImportJob({ storage, jobs: { claim: async () => job, get: async () => job, progress: async () => {}, heartbeat: async () => {}, complete: async () => {}, fail, markCancelled: async () => {} }, importAsset });
-    expect(await process(ownerId, jobId)).toEqual({ phase: "failed", errorCode: "IMPORT_FAILED" });
+    expect(await process(ownerId, jobId)).toEqual({ phase: "failed", errorCode: "IMPORT_FAILED", candidates: [] });
     expect(fail).toHaveBeenCalled();
     expect(importAsset).not.toHaveBeenCalled();
     expect(await storage.exists(parseStorageKey(`${uploadPrefix}/0.part`))).toBe(true);
+  });
+
+  it("passes the selected candidate through when resuming an ambiguous job", async () => {
+    root = await mkdtemp(join(tmpdir(), "yggdrasil-job-"));
+    const storage = new LocalAssetStorage(root);
+    const uploadPrefix = "staging/upload-test";
+    await mkdir(join(root, uploadPrefix), { recursive: true });
+    await writeFile(join(root, uploadPrefix, "0.part"), bytes);
+    const job = {
+      id: jobId, ownerId, name: "test", phase: "failed", uploadPrefix, selectedModelPath: "high/model.gltf",
+      files: [{ relativePath: "high/model.gltf", storageKey: `${uploadPrefix}/0.part`, byteSize: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") }],
+      totalBytes: bytes.length, cancelRequested: false,
+    };
+    const importAsset = vi.fn(async (input: { selectedModelPath?: string }) => {
+      expect(input.selectedModelPath).toBe("high/model.gltf");
+      return { assetId: jobId };
+    });
+    const process = createProcessImportJob({ storage, jobs: { claim: async () => ({ ...job, phase: "staging" }), get: async () => job, progress: async () => {}, heartbeat: async () => {}, complete: async () => {}, fail: async () => {}, markCancelled: async () => {} }, importAsset });
+    expect(await process(ownerId, jobId)).toEqual({ phase: "completed", assetId: jobId });
   });
 });

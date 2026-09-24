@@ -72,6 +72,14 @@ describe("buildImportManifest", () => {
     } satisfies Partial<AssetImportError>);
   });
 
+  it("selects one candidate and keeps alternates with their package paths", async () => {
+    const low = { relativePath: "low/model.gltf", bytes: bytes('{"asset":{"version":"2.0"}}') };
+    const high = { relativePath: "high/model.gltf", bytes: bytes('{"asset":{"version":"2.0"}}') };
+    const result = await buildImportManifest([low, high], "high/model.gltf");
+    expect(result.primaryModel.relativePath).toBe("high/model.gltf");
+    expect(result.alternates.map((entry) => entry.relativePath)).toEqual(["low/model.gltf"]);
+  });
+
   it("requires valid glTF 2.0 JSON", async () => {
     await rejectsCode([file("bad.gltf", bytes('{"asset":{"version":"1.0"}}'))], "INVALID_FILE");
     expect((await buildImportManifest([file("good.gltf", bytes('{"asset":{"version":"2.0"}}'))])).primaryModel.relativePath).toBe("good.gltf");

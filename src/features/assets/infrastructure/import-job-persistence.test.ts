@@ -81,4 +81,13 @@ describe("Drizzle import job persistence", () => {
     expect(await new DrizzleImportJobRepository().claim(ownerId, job.id)).toMatchObject({ id: job.id, phase: "staging" });
     expect(await repo.claim("another-owner", job.id)).toBeNull();
   });
+
+  it("accepts only a recorded owner candidate when selecting a variant", async () => {
+    await owner();
+    const repo = new DrizzleImportJobRepository();
+    const job = await repo.create({ ownerId, name: "Variants", uploadPrefix: "staging/upload-private", files: [], totalBytes: 0 });
+    await testDb.update(importJobs).set({ phase: "failed", errorCode: "AMBIGUOUS_PRIMARY_MODEL", candidates: ["low/model.gltf", "high/model.gltf"] }).where(eq(importJobs.id, job.id));
+    expect(await repo.selectVariant(ownerId, job.id, "missing/model.gltf")).toBeNull();
+    expect(await repo.selectVariant(ownerId, job.id, "high/model.gltf")).toMatchObject({ phase: "received", selectedModelPath: "high/model.gltf" });
+  });
 });

@@ -5,6 +5,7 @@ type Session = { user: { id: string } } | null;
 type JobRepository = {
   get(ownerId: string, jobId: string): Promise<ImportJobRecord | null>;
   retry(ownerId: string, jobId: string): Promise<ImportJobRecord | null>;
+  selectVariant(ownerId: string, jobId: string, selectedModelPath: string): Promise<ImportJobRecord | null>;
   requestCancel(ownerId: string, jobId: string): Promise<boolean>;
   markCancelled(ownerId: string, jobId: string): Promise<void>;
 };
@@ -15,7 +16,7 @@ function present(job: ImportJobRecord) {
     nextFile: job.nextFile, fileCount: job.files.length,
     processedBytes: job.processedBytes, totalBytes: job.totalBytes,
     cancelRequested: job.cancelRequested, errorCode: job.errorCode,
-    leaseUntil: job.leaseUntil, updatedAt: job.updatedAt,
+    leaseUntil: job.leaseUntil, candidates: job.candidates, selectedModelPath: job.selectedModelPath, updatedAt: job.updatedAt,
   };
 }
 
@@ -40,10 +41,19 @@ export function createImportJobHandler(deps: {
     async PATCH(request: Request, jobId: string): Promise<Response> {
       const found = await authenticate(request, jobId);
       if (found.response) return found.response;
-      let action: unknown;
-      try { action = (await request.json()).action; } catch { return Response.json({ code: "INVALID_REQUEST" }, { status: 400 }); }
+      let body: unknown;
+      try { body = await request.json(); } catch { return Response.json({ code: "INVALID_REQUEST" }, { status: 400 }); }
+      if (!body || typeof body !== "object" || Array.isArray(body)) return Response.json({ code: "INVALID_REQUEST" }, { status: 400 });
+      const input = body as { action?: unknown; selectedModelPath?: unknown };
+      const action = input.action;
       if (action === "retry") {
         const updated = await deps.jobs.retry(found.ownerId, jobId);
+        return updated ? Response.json(present(updated)) : Response.json({ code: "INVALID_JOB_STATE" }, { status: 409 });
+      }
+      if (action === "select-variant") {
+        const selectedModelPath = input.selectedModelPath;
+        if (typeof selectedModelPath !== "string" || !selectedModelPath) return Response.json({ code: "INVALID_REQUEST" }, { status: 400 });
+        const updated = await deps.jobs.selectVariant(found.ownerId, jobId, selectedModelPath);
         return updated ? Response.json(present(updated)) : Response.json({ code: "INVALID_JOB_STATE" }, { status: 409 });
       }
       if (action === "cancel") {

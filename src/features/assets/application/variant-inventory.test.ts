@@ -17,6 +17,10 @@ describe("inventoryVariants", () => {
     expect(variants[0].resources.map((file) => file.relativePath)).toEqual(["hero/low.bin"]);
     expect(variants[1].resources.map((file) => file.relativePath)).toEqual(["hero/high.mtl"]);
     expect(variants.every((variant) => variant.attribution === "present")).toBe(true);
+    expect(inventoryVariants([
+      { relativePath: "hero/low.gltf", bytes: bytes('{"asset":{"version":"2.0"}}') },
+      { relativePath: "hero/high.obj", bytes: bytes("v 0 0 0\n") },
+    ], "hero/high.obj").find((variant) => variant.selected)?.model.relativePath).toBe("hero/high.obj");
   });
 
   it("labels missing attribution as unknown", () => {

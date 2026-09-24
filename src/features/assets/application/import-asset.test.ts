@@ -51,7 +51,7 @@ function fakes() {
     async getAsset() { return null; },
     async listAssets() { return []; },
   };
-  const manifest: ImportManifest = { primaryModel: model, dependencies: [binary], attributionFiles: [], thumbnails: [], warnings: [] };
+  const manifest: ImportManifest = { primaryModel: model, alternates: [], dependencies: [binary], attributionFiles: [], thumbnails: [], warnings: [] };
   const buildManifest = vi.fn(async (_entries: ImportSource[]): Promise<ImportManifest<ImportSource>> => manifest);
   const analyze = vi.fn(async (_storage: AssetStorage, key: StorageKey) => {
     events.push(`analyze:${key}`);
@@ -140,7 +140,7 @@ describe("createImportAsset", () => {
   it("stores an OBJ source beside a normalized GLB and analyzes the normalized file", async () => {
     const deps = fakes();
     const obj: ImportFile = { relativePath: "folder/triangle.obj", bytes: new TextEncoder().encode("v 0 0 0\n") };
-    deps.buildManifest.mockResolvedValueOnce({ primaryModel: obj, dependencies: [], attributionFiles: [], thumbnails: [], warnings: [] });
+    deps.buildManifest.mockResolvedValueOnce({ primaryModel: obj, alternates: [], dependencies: [], attributionFiles: [], thumbnails: [], warnings: [] });
     deps.analyze.mockImplementationOnce(async (_storage, key) => {
       expect(key).toBe("staging/import-1/__normalized/folder/triangle.glb");
       return analysis;

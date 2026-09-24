@@ -5,6 +5,7 @@ export type VariantCandidate = {
   resources: ImportFile[];
   attributionFiles: ImportFile[];
   attribution: "present" | "unknown";
+  selected: boolean;
 };
 
 function extension(path: string): string {
@@ -45,12 +46,12 @@ function references(model: ImportFile): string[] {
   }
 }
 
-export function inventoryVariants(entries: ImportFile[]): VariantCandidate[] {
+export function inventoryVariants(entries: ImportFile[], selectedModelPath?: string): VariantCandidate[] {
   const files = new Map(entries.map((entry) => [entry.relativePath.toLocaleLowerCase("en-US"), entry]));
   const models = entries.filter((entry) => ["gltf", "glb", "obj", "fbx"].includes(extension(entry.relativePath)));
   const attributionFiles = entries.filter((entry) => ["txt", "md"].includes(extension(entry.relativePath)));
   return models.map((model) => {
     const resources = references(model).map((reference) => files.get(relative(model.relativePath, reference).toLocaleLowerCase("en-US"))).filter((file): file is ImportFile => Boolean(file));
-    return { model, resources, attributionFiles, attribution: attributionFiles.length ? "present" : "unknown" };
+    return { model, resources, attributionFiles, attribution: attributionFiles.length ? "present" : "unknown", selected: model.relativePath === selectedModelPath };
   });
 }

@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, lt, notInArray, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, or } from "drizzle-orm";
 import { db } from "@/db/client";
 import { importJobs } from "@/db/schema/assets";
 import { parseStorageKey } from "@/lib/storage/storage-key";
@@ -55,8 +55,8 @@ export class DrizzleImportJobRepository {
     if (!job) throw new Error("Import job not found");
   }
 
-  async fail(ownerId: string, jobId: string, errorCode: string): Promise<void> {
-    const [job] = await db.update(importJobs).set({ phase: "failed", errorCode, leaseUntil: null, updatedAt: new Date() })
+  async fail(ownerId: string, jobId: string, errorCode: string, candidates: string[] = []): Promise<void> {
+    const [job] = await db.update(importJobs).set({ phase: "failed", errorCode, candidates, leaseUntil: null, updatedAt: new Date() })
       .where(and(eq(importJobs.id, jobId), eq(importJobs.ownerId, ownerId), inArray(importJobs.phase, ["staging", "analyzing", "committing"]))).returning({ id: importJobs.id });
     if (!job) throw new Error("Import job not found");
   }
@@ -93,8 +93,17 @@ export class DrizzleImportJobRepository {
 
   async retry(ownerId: string, jobId: string): Promise<ImportJobRecord | null> {
     const [job] = await db.update(importJobs).set({
-      phase: "received", nextFile: 0, processedBytes: 0, errorCode: null, cancelRequested: false, updatedAt: new Date(),
+      phase: "received", nextFile: 0, processedBytes: 0, errorCode: null, candidates: [], cancelRequested: false, updatedAt: new Date(),
     }).where(and(eq(importJobs.id, jobId), eq(importJobs.ownerId, ownerId), eq(importJobs.phase, "failed"))).returning();
+    return job ?? null;
+  }
+
+  async selectVariant(ownerId: string, jobId: string, selectedModelPath: string): Promise<ImportJobRecord | null> {
+    const current = await this.get(ownerId, jobId);
+    if (!current?.candidates.includes(selectedModelPath)) return null;
+    const [job] = await db.update(importJobs).set({
+      phase: "received", nextFile: 0, processedBytes: 0, errorCode: null, selectedModelPath, cancelRequested: false, updatedAt: new Date(),
+    }).where(and(eq(importJobs.id, jobId), eq(importJobs.ownerId, ownerId), eq(importJobs.phase, "failed"), eq(importJobs.errorCode, "AMBIGUOUS_PRIMARY_MODEL"))).returning();
     return job ?? null;
   }
 }

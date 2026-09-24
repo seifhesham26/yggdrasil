@@ -209,4 +209,37 @@ test("owner imports models, reopens previews, and completes optimization workflo
     await expect(page.getByRole("progressbar", { name: "Loading model" })).toBeHidden({ timeout: 30_000 });
     expect(await (await page.request.get(archiveFile)).body()).toEqual(Buffer.from(archive));
   });
+
+  await test.step("select and reopen one model from an ambiguous package", async () => {
+    await page.goto("/library");
+    await page.getByLabel("Choose model files").setInputFiles([
+      { name: "low/model.gltf", mimeType: "model/gltf+json", buffer: Buffer.from(model.bytes) },
+      { name: "low/triangle.bin", mimeType: "application/octet-stream", buffer: Buffer.from(binary.bytes) },
+      { name: "high/model.gltf", mimeType: "model/gltf+json", buffer: Buffer.from(model.bytes) },
+      { name: "high/triangle.bin", mimeType: "application/octet-stream", buffer: Buffer.from(binary.bytes) },
+      { name: "LICENSE.txt", mimeType: "text/plain", buffer: Buffer.from("CC0 fixture attribution") },
+    ]);
+    const [uploadResponse] = await Promise.all([
+      page.waitForResponse((candidate) => candidate.url().endsWith("/api/assets/import/jobs")),
+      page.getByRole("button", { name: "Import asset" }).click(),
+    ]);
+    expect(uploadResponse.status(), await uploadResponse.text()).toBe(202);
+    const { jobId: variantJobId } = await uploadResponse.json() as { jobId: string };
+    await expect(page.getByText("Select a model variant")).toBeVisible({ timeout: 30_000 });
+    const pending = await (await page.request.get(`/api/assets/import/jobs/${variantJobId}`)).json();
+    expect(pending).toMatchObject({ phase: "failed", errorCode: "AMBIGUOUS_PRIMARY_MODEL", candidates: ["low/model.gltf", "high/model.gltf"] });
+    await page.getByLabel("Model variants").getByRole("button", { name: "high/model.gltf" }).click();
+    await expect(page.getByText("Import complete")).toBeVisible({ timeout: 30_000 });
+    const completed = await (await page.request.get(`/api/assets/import/jobs/${variantJobId}`)).json();
+    expect(completed).toMatchObject({ phase: "completed", selectedModelPath: "high/model.gltf" });
+    await page.getByRole("link", { name: "Open asset report" }).click();
+    const selectedAssetId = new URL(page.url()).pathname.split("/").at(-1)!;
+    const history = await (await page.request.get(`/api/assets/${selectedAssetId}/optimization?view=history`)).json();
+    expect(history.versions[0].storageKey).toBe(`assets/${selectedAssetId}/source/high/model.gltf`);
+    for (const file of ["low/model.gltf", "low/triangle.bin", "high/model.gltf", "high/triangle.bin", "LICENSE.txt"]) {
+      expect((await page.request.get(`/api/assets/${selectedAssetId}/file?key=${encodeURIComponent(`assets/${selectedAssetId}/source/${file}`)}`)).status()).toBe(200);
+    }
+    const license = await (await page.request.get(`/api/assets/${selectedAssetId}/file?key=${encodeURIComponent(`assets/${selectedAssetId}/source/LICENSE.txt`)}`)).body();
+    expect(license.toString()).toBe("CC0 fixture attribution");
+  });
 });

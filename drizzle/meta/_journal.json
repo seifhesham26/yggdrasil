@@ -43,6 +43,13 @@
       "when": 1790245911854,
       "tag": "0005_jittery_colleen_wing",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790250000000,
+      "tag": "0006_variant_selection",
+      "breakpoints": true
     }
   ]
 }

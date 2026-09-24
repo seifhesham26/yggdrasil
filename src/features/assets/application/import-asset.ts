@@ -8,7 +8,7 @@ import { readImportBytes } from "../infrastructure/import-manifest";
 import { convertModelToGlb } from "../infrastructure/model-converter";
 import type { AssetRepository, StoredAssetFile } from "../infrastructure/asset-repository";
 
-export type ImportAssetRequest = { ownerId: string; name: string; entries: ImportSource[]; assetId?: string };
+export type ImportAssetRequest = { ownerId: string; name: string; entries: ImportSource[]; assetId?: string; selectedModelPath?: string };
 export type ImportAssetResult = { assetId: string; sourceId: string; analysis: AssetAnalysis };
 
 const MIME: Record<string, string> = {
@@ -32,7 +32,7 @@ function fileRecord(file: ImportSource, prefix: string, role: StoredAssetFile["r
 export function createImportAsset(deps: {
   storage: AssetStorage;
   repository: AssetRepository;
-  buildManifest: (entries: ImportSource[]) => Promise<ImportManifest<ImportSource>>;
+  buildManifest: (entries: ImportSource[], selectedModelPath?: string) => Promise<ImportManifest<ImportSource>>;
   analyze: typeof analyzeGltf;
   convert?: typeof convertModelToGlb;
   createId: () => string;
@@ -40,10 +40,10 @@ export function createImportAsset(deps: {
   isCancelled?: () => Promise<boolean>;
 }) {
   return async function importAsset(request: ImportAssetRequest): Promise<ImportAssetResult> {
-    const manifest = await deps.buildManifest(request.entries);
+    const manifest = await deps.buildManifest(request.entries, request.selectedModelPath);
     const importId = request.assetId ?? deps.createId();
     const stagedPrefix = parseStorageKey(`staging/${importId}`);
-    const sourceFiles = [manifest.primaryModel, ...manifest.dependencies, ...manifest.attributionFiles, ...(manifest.archive ? [manifest.archive] : [])];
+    const sourceFiles = [manifest.primaryModel, ...manifest.alternates, ...manifest.dependencies, ...manifest.attributionFiles, ...(manifest.archive ? [manifest.archive] : [])];
     const sourceExtension = manifest.primaryModel.relativePath.slice(manifest.primaryModel.relativePath.lastIndexOf(".") + 1).toLowerCase();
     let analysisFile: ImportSource = manifest.primaryModel;
     let conversionWarnings: Array<{ code: string; message: string }> = [];
@@ -64,6 +64,7 @@ export function createImportAsset(deps: {
     }
     const records = [
       fileRecord(manifest.primaryModel, finalPrefix, converted ? "source" : "model"),
+      ...manifest.alternates.map((file) => fileRecord(file, finalPrefix, "source")),
       ...manifest.dependencies.map((file) => fileRecord(file, finalPrefix, "dependency")),
       ...manifest.attributionFiles.map((file) => fileRecord(file, finalPrefix, "attribution")),
       ...(manifest.archive ? [fileRecord(manifest.archive, finalPrefix, "source")] : []),

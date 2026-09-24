@@ -6,7 +6,7 @@ import { ArrowUpRight, FileArchive, FolderOpen, Layers3, UploadCloud } from "luc
 
 type UploadResult = { assetId: string; status: string };
 type Upload = (files: File[], onProgress: (sent: number, total: number) => void, signal: AbortSignal, onJob?: (jobId: string) => void) => Promise<UploadResult>;
-type JobStatus = { jobId: string; phase: string; assetId?: string | null; errorCode?: string | null; processedBytes?: number; totalBytes?: number; leaseUntil?: string | null };
+type JobStatus = { jobId: string; phase: string; assetId?: string | null; errorCode?: string | null; candidates?: string[]; processedBytes?: number; totalBytes?: number; leaseUntil?: string | null };
 const activeJobKey = "yggdrasil.activeImportJob";
 
 const errorMessages: Record<string, string> = {
@@ -51,7 +51,7 @@ async function runJob(jobId: string): Promise<UploadResult> {
   }
   if (result.phase !== "completed" || !result.assetId) {
     if (result.phase === "cancelled") localStorage.removeItem(activeJobKey);
-    throw Object.assign(new Error(result.phase === "cancelled" ? "Import cancelled" : "Import failed"), { code: result.errorCode ?? (result.phase === "cancelled" ? "IMPORT_CANCELLED" : "IMPORT_FAILED") });
+    throw Object.assign(new Error(result.phase === "cancelled" ? "Import cancelled" : "Import failed"), { code: result.errorCode ?? (result.phase === "cancelled" ? "IMPORT_CANCELLED" : "IMPORT_FAILED"), candidates: result.candidates ?? [] });
   }
   localStorage.removeItem(activeJobKey);
   return { assetId: result.assetId, status: "ready" };
@@ -105,6 +105,7 @@ export function ImportDropzone({ upload = uploadToApi }: { upload?: Upload }) {
   const [assetId, setAssetId] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [processingProgress, setProcessingProgress] = useState<JobStatus | null>(null);
+  const [variantCandidates, setVariantCandidates] = useState<string[]>([]);
 
   useEffect(() => {
     folderInput.current?.setAttribute("webkitdirectory", "");
@@ -125,6 +126,7 @@ export function ImportDropzone({ upload = uploadToApi }: { upload?: Upload }) {
       }).catch((reason: unknown) => {
         if (!active) return;
         const code = reason && typeof reason === "object" && "code" in reason ? String(reason.code) : "IMPORT_FAILED";
+        setVariantCandidates(reason && typeof reason === "object" && "candidates" in reason && Array.isArray(reason.candidates) ? reason.candidates.map(String) : []);
         setError(errorMessages[code] ?? errorMessages.IMPORT_FAILED);
         setPhase("error");
       });
@@ -153,6 +155,7 @@ export function ImportDropzone({ upload = uploadToApi }: { upload?: Upload }) {
     setAssetId(null);
     setJobId(null);
     setProcessingProgress(null);
+    setVariantCandidates([]);
   }
 
   async function submit() {
@@ -172,11 +175,33 @@ export function ImportDropzone({ upload = uploadToApi }: { upload?: Upload }) {
       router.refresh();
     } catch (reason) {
       const code = reason && typeof reason === "object" && "code" in reason ? String(reason.code) : "IMPORT_FAILED";
+      setVariantCandidates(reason && typeof reason === "object" && "candidates" in reason && Array.isArray(reason.candidates) ? reason.candidates.map(String) : []);
       const detail = reason && typeof reason === "object" && "message" in reason && typeof reason.message === "string" ? reason.message : null;
       setError(reason instanceof DOMException && reason.name === "AbortError" ? "Upload cancelled." : code === "MISSING_DEPENDENCY" && detail ? detail : errorMessages[code] ?? errorMessages.IMPORT_FAILED);
       setPhase("error");
     } finally {
       controller.current = null;
+    }
+  }
+
+  async function selectVariant(selectedModelPath: string) {
+    const current = jobId ?? localStorage.getItem(activeJobKey);
+    if (!current) return;
+    try {
+      await jobRequest(`/api/assets/import/jobs/${encodeURIComponent(current)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "select-variant", selectedModelPath }) });
+      setVariantCandidates([]);
+      setError(null);
+      setPhase("processing");
+      const result = await runJob(current);
+      setAssetId(result.assetId);
+      setJobId(null);
+      setPhase("complete");
+      router.refresh();
+    } catch (reason) {
+      const code = reason && typeof reason === "object" && "code" in reason ? String(reason.code) : "IMPORT_FAILED";
+      setVariantCandidates(reason && typeof reason === "object" && "candidates" in reason && Array.isArray(reason.candidates) ? reason.candidates.map(String) : []);
+      setError(errorMessages[code] ?? errorMessages.IMPORT_FAILED);
+      setPhase("error");
     }
   }
 
@@ -257,6 +282,7 @@ export function ImportDropzone({ upload = uploadToApi }: { upload?: Upload }) {
           {phase === "complete" ? <span className="success-message">Import complete</span> : null}
           {phase === "error" ? <span role="alert">{error}</span> : null}
         </div>
+        {phase === "error" && variantCandidates.length ? <div className="import-variants" aria-label="Model variants"><strong>Select a model variant</strong>{variantCandidates.map((candidate) => <button key={candidate} type="button" onClick={() => selectVariant(candidate)}>{candidate}</button>)}</div> : null}
         {phase === "uploading" ? <button type="button" onClick={() => controller.current?.abort()}>Cancel upload</button> : null}
         {phase === "processing" && upload === uploadToApi ? <button type="button" onClick={cancelProcessing}>Cancel import</button> : null}
         {phase === "error" && jobId && upload === uploadToApi ? <button type="button" onClick={retryJob}>Retry saved import</button> : null}

@@ -8,7 +8,7 @@ import type { ImportAssetRequest, ImportAssetResult } from "./import-asset";
 
 type Job = {
   id: string; ownerId: string; name: string; phase: string; uploadPrefix: string;
-  files: ImportJobFile[]; totalBytes: number; cancelRequested: boolean;
+  files: ImportJobFile[]; totalBytes: number; cancelRequested: boolean; selectedModelPath?: string | null;
 };
 
 type Jobs = {
@@ -17,7 +17,7 @@ type Jobs = {
   progress(ownerId: string, jobId: string, checkpoint: { phase: "staging" | "analyzing" | "committing"; nextFile: number; processedBytes: number; totalBytes: number }): Promise<void>;
   heartbeat(ownerId: string, jobId: string): Promise<void>;
   complete(ownerId: string, jobId: string, assetId: string): Promise<void>;
-  fail(ownerId: string, jobId: string, errorCode: string): Promise<void>;
+  fail(ownerId: string, jobId: string, errorCode: string, candidates?: string[]): Promise<void>;
   markCancelled(ownerId: string, jobId: string): Promise<void>;
 };
 
@@ -41,7 +41,7 @@ export function createProcessImportJob(deps: {
     isCancelled: () => Promise<boolean>;
   }) => Promise<Pick<ImportAssetResult, "assetId">>;
 }) {
-  return async function process(ownerId: string, jobId: string): Promise<{ phase: "completed"; assetId: string } | { phase: "failed"; errorCode: string } | { phase: "cancelled" } | null> {
+  return async function process(ownerId: string, jobId: string): Promise<{ phase: "completed"; assetId: string } | { phase: "failed"; errorCode: string; candidates: string[] } | { phase: "cancelled" } | null> {
     const job = await deps.jobs.claim(ownerId, jobId);
     if (!job) return null;
     let heartbeatError: unknown;
@@ -60,7 +60,7 @@ export function createProcessImportJob(deps: {
         await verifyFile(path, file);
         entries.push({ relativePath: file.relativePath, path, byteSize: file.byteSize, sha256: file.sha256 });
       }
-      const result = await deps.importAsset({ ownerId, name: job.name, assetId: job.id, entries }, {
+      const result = await deps.importAsset({ ownerId, name: job.name, assetId: job.id, selectedModelPath: job.selectedModelPath ?? undefined, entries }, {
         reportProgress: (progress) => deps.jobs.progress(ownerId, jobId, progress),
         isCancelled: async () => {
           if (heartbeatError) throw heartbeatError;
@@ -78,8 +78,8 @@ export function createProcessImportJob(deps: {
         await deps.storage.removeTree(parseStorageKey(job.uploadPrefix));
         return { phase: "cancelled" };
       }
-      await deps.jobs.fail(ownerId, jobId, code);
-      return { phase: "failed", errorCode: code };
+      await deps.jobs.fail(ownerId, jobId, code, error instanceof AssetImportError ? error.candidates : []);
+      return { phase: "failed", errorCode: code, candidates: error instanceof AssetImportError ? error.candidates : [] };
     } finally {
       clearInterval(timer);
     }

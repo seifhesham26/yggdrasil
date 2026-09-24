@@ -5,6 +5,7 @@ export type ImportJobFile = { relativePath: string; storageKey: string; byteSize
 
 export type ImportManifest<T extends ImportSource = ImportFile> = {
   primaryModel: T;
+  alternates: T[];
   archive?: T;
   dependencies: T[];
   attributionFiles: T[];

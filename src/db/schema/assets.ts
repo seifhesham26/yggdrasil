@@ -31,6 +31,8 @@ export const importJobs = pgTable("import_jobs", {
   totalBytes: bigint("total_bytes", { mode: "number" }).notNull(),
   cancelRequested: boolean("cancel_requested").default(false).notNull(),
   errorCode: text("error_code"),
+  candidates: jsonb("candidates").$type<string[]>().default([]).notNull(),
+  selectedModelPath: text("selected_model_path"),
   assetId: uuid("asset_id"),
   leaseUntil: timestamp("lease_until", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

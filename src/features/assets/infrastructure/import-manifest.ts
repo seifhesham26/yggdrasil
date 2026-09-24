@@ -269,10 +269,10 @@ async function expandZipFile(archive: FileBackedImportFile): Promise<FileBackedI
   }
 }
 
-export function buildImportManifest(entries: ImportFile[]): Promise<ImportManifest>;
-export function buildImportManifest(entries: FileBackedImportFile[]): Promise<ImportManifest<FileBackedImportFile>>;
-export function buildImportManifest(entries: ImportSource[]): Promise<ImportManifest<ImportSource>>;
-export async function buildImportManifest(entries: ImportSource[]): Promise<ImportManifest<ImportSource>> {
+export function buildImportManifest(entries: ImportFile[], selectedModelPath?: string): Promise<ImportManifest>;
+export function buildImportManifest(entries: FileBackedImportFile[], selectedModelPath?: string): Promise<ImportManifest<FileBackedImportFile>>;
+export function buildImportManifest(entries: ImportSource[], selectedModelPath?: string): Promise<ImportManifest<ImportSource>>;
+export async function buildImportManifest(entries: ImportSource[], selectedModelPath?: string): Promise<ImportManifest<ImportSource>> {
   if (entries.length === 0) fail("NO_PRIMARY_MODEL", "No files were provided");
   if (entries.length > MAX_ENTRIES) fail("ARCHIVE_LIMIT_EXCEEDED", "Import contains too many files");
   const zipEntries = entries.filter((entry) => extension(entry.relativePath) === ".zip");
@@ -324,11 +324,14 @@ export async function buildImportManifest(entries: ImportSource[]): Promise<Impo
   }
   const models = normalized.filter((entry) => modelExtensions.has(extension(entry.relativePath)));
   if (!models.length) fail("NO_PRIMARY_MODEL", "Import contains no glTF or GLB model");
-  if (models.length > 1) throw new AssetImportError("AMBIGUOUS_PRIMARY_MODEL", "Select one primary model", models.map((entry) => entry.relativePath));
+  if (models.length > 1 && !selectedModelPath) throw new AssetImportError("AMBIGUOUS_PRIMARY_MODEL", "Select one primary model", models.map((entry) => entry.relativePath));
+  if (selectedModelPath && !models.some((entry) => entry.relativePath === selectedModelPath)) fail("INVALID_FILE", `Selected model is not present in the package: ${selectedModelPath}`);
+  const primary = selectedModelPath ? models.find((entry) => entry.relativePath === selectedModelPath)! : models[0];
   const byPath = new Map(normalized.map((entry) => [entry.relativePath, entry]));
-  if (extension(models[0].relativePath) === ".obj") await validateObjDependencies(models[0], byPath);
+  if (extension(primary.relativePath) === ".obj") await validateObjDependencies(primary, byPath);
   return {
-    primaryModel: models[0],
+    primaryModel: primary,
+    alternates: models.filter((entry) => entry !== primary),
     archive,
     dependencies: normalized.filter((entry) => !modelExtensions.has(extension(entry.relativePath)) && !attributionExtensions.has(extension(entry.relativePath))),
     attributionFiles: normalized.filter((entry) => attributionExtensions.has(extension(entry.relativePath))),
