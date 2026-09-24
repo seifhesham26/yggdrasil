@@ -6,6 +6,11 @@ import { DrizzleAssetRepository } from "@/features/assets/infrastructure/asset-r
 import { AnalysisSummary } from "@/features/assets/ui/analysis-summary";
 import { ModelCanvasLoader } from "@/features/viewer/model-canvas-loader";
 import { OptimizationControls } from "@/features/assets/ui/optimization-controls";
+import { VariantControls } from "@/features/assets/ui/variant-controls";
+import { variantSourcePath } from "@/features/assets/application/variant-switch";
+import { LocalAssetStorage } from "@/lib/storage/local-storage";
+import { serverEnv } from "@/lib/env/server";
+import { parseStorageKey } from "@/lib/storage/storage-key";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +22,15 @@ export default async function AssetPage({ params }: { params: Promise<{ assetId:
   if (!asset) notFound();
   const primary = asset.selectedFile;
   const sourcePrimary = asset.files.find((file) => file.role === "model");
+  const candidates = asset.files.filter((file) => (file.role === "model" || file.role === "source") && !file.relativePath.startsWith("__normalized/") && /\.(?:gltf|glb|obj|fbx)$/i.test(file.relativePath)).map((file) => file.relativePath);
+  const attributionFiles = asset.files.filter((file) => file.role === "attribution");
+  const currentModelPath = primary ? variantSourcePath(primary.storageKey) ?? (primary.relativePath.startsWith("__normalized/") ? candidates.find((path) => primary.relativePath.includes(path.replace(/\.[^.]+$/, ""))) ?? null : candidates.includes(primary.relativePath) ? primary.relativePath : null) : null;
+  const scopedAttributionFiles = attributionFiles.filter((file) => {
+    const directory = file.relativePath.split("/").slice(0, -1).join("/");
+    return !directory || Boolean(currentModelPath?.startsWith(`${directory}/`));
+  });
+  const explicitAttribution = scopedAttributionFiles.filter((file) => /^(?:license|licence|copying|credits|attribution|notice)(?:\.[^.]+)?$/i.test(file.relativePath.split("/").at(-1) ?? "") && file.byteSize <= 64 * 1024);
+  const attribution = explicitAttribution.length === 1 && new TextDecoder().decode(await new LocalAssetStorage(serverEnv.YGGDRASIL_ASSET_ROOT).read(parseStorageKey(explicitAttribution[0].storageKey))).trim() ? "present" : "unknown";
   const url = primary ? `/api/assets/${asset.id}/file?key=${encodeURIComponent(primary.storageKey)}` : null;
   const totalSize = asset.byteSize === null ? "Pending" : `${(asset.byteSize / 1024 / 1024).toFixed(1)} MB`;
   const sourceSize = asset.sourceByteSize == null ? "Pending" : `${(asset.sourceByteSize / 1024 / 1024).toFixed(1)} MB`;
@@ -33,8 +47,9 @@ export default async function AssetPage({ params }: { params: Promise<{ assetId:
         </aside>
       </div>
       <OptimizationControls assetId={asset.id} sourceFiles={asset.files.map((file) => ({ relativePath: file.relativePath, storageKey: file.storageKey }))} />
+      {candidates.length ? <VariantControls assetId={asset.id} candidates={candidates} currentModelPath={currentModelPath} attributionFiles={attributionFiles.map((file) => ({ relativePath: file.relativePath, storageKey: file.storageKey }))} attribution={attribution} /> : null}
       <div className="asset-detail-lower">
-        <section className="asset-info-section" aria-labelledby="source-heading"><div className="detail-section-title"><FileArchive size={20} aria-hidden="true" /><h2 id="source-heading">Source package</h2></div><dl><div><dt>Primary model</dt><dd>{sourcePrimary?.relativePath ?? "Not available"}</dd></div><div><dt>Stored files</dt><dd>{asset.files.length}</dd></div><div><dt>Source size</dt><dd>{sourceSize}</dd></div><div><dt>Imported</dt><dd><time dateTime={asset.createdAt.toISOString()}>{new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(asset.createdAt)}</time></dd></div></dl><p className="detail-empty">No destructive changes applied. Your original source files remain unchanged.</p></section>
+        <section className="asset-info-section" aria-labelledby="source-heading"><div className="detail-section-title"><FileArchive size={20} aria-hidden="true" /><h2 id="source-heading">Source package</h2></div><dl><div><dt>Primary model</dt><dd>{currentModelPath ?? sourcePrimary?.relativePath ?? "Not available"}</dd></div><div><dt>Stored files</dt><dd>{asset.files.length}</dd></div><div><dt>Source size</dt><dd>{sourceSize}</dd></div><div><dt>Imported</dt><dd><time dateTime={asset.createdAt.toISOString()}>{new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(asset.createdAt)}</time></dd></div></dl><p className="detail-empty">No destructive changes applied. Your original source files remain unchanged.</p></section>
         <section className="asset-info-section" aria-labelledby="animation-heading"><div className="detail-section-title"><Film size={20} aria-hidden="true" /><h2 id="animation-heading">Animations</h2></div>{asset.analysis?.animations.length ? <ul className="animation-list">{asset.analysis.animations.map((clip, index) => <li key={`${clip.name}-${index}`}><span>{clip.name || `Untitled clip ${index + 1}`}</span><span>{clip.durationSeconds.toFixed(2)} s <span aria-hidden="true">/</span> {clip.channels} channels</span></li>)}</ul> : <p className="detail-empty">No embedded animation clips found.</p>}</section>
       </div>
       {asset.analysis?.extensionsUsed.length ? <p className="asset-extensions"><strong>Extensions used</strong> {asset.analysis.extensionsUsed.join(", ")}</p> : null}

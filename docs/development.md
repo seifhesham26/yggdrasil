@@ -12,6 +12,8 @@ Yggdrasil runs locally from `C:\dev\yggdrasil`. The toolchain verified for this 
 
 The import flow accepts glTF/GLB, FBX, OBJ with MTL/texture dependencies, folders, and ZIPs. FBX and OBJ are converted to web-ready GLBs; the original package is retained. OBJ materials and some FBX exporter features may not convert faithfully, so inspect the warnings in the asset report. The rest of the editing workflow is tracked in [the roadmap](roadmap/README.md).
 
+After upload, the owner reviews every candidate model, its detectable required resources, missing or incompatible inputs, and package license/credit text before selecting a preview. A later switch makes a separate preview version and retains every original source file. Root credit files apply to all variants; a credit file inside one variant folder applies only to that folder. Missing or ambiguous attribution is shown as **unknown**. Supplied text is not a legal clearance or redistribution approval. Review shows up to 64 KiB of each text file and marks a longer preview as truncated; the retained file is available from the protected asset page after import. FBX external resources cannot be fully inferred before conversion and are labeled unverified.
+
 Uploads stream into protected temporary files. Current limits are 1 GiB of multipart or ZIP source bytes, 10,000 files/ZIP entries, 1 GiB of expanded ZIP content, 256 MiB per processed file, and a 100:1 declared ZIP expansion ratio. ZIP entry paths, symlinks, encryption, and actual extracted bytes are checked before an asset is made ready. Persisted import jobs expose upload and processing progress, cancellation, and retry across app restarts.
 
 ## Verification

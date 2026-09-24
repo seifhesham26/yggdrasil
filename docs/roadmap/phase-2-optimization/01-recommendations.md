@@ -1,6 +1,6 @@
 # Task 2.1 — Findings and recommendations
 
-**Status:** In progress. **Depends on:** Phase 1.
+**Status:** Accepted for the implemented recommendation contract. **Depends on:** Phase 1.
 
 **Outcome:** Analysis produces specific, explainable optimization suggestions rather than a single opaque score.
 
@@ -14,3 +14,5 @@
 - [x] Only the authenticated owner can request and view private findings.
 
 **Likely touchpoints:** `gltf-analyzer.ts`, asset domain types, Drizzle finding records, asset detail UI. **Evidence to record:** fixture metrics and rule thresholds.
+
+The owner browser exercised the recommendations and explicit approval path on the isolated PostgreSQL gate. See [current evidence](EVIDENCE.md). Unsupported compression and material cases remain warnings rather than actions.

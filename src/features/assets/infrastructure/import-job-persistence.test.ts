@@ -44,6 +44,18 @@ describe("Drizzle import job persistence", () => {
     expect(await repo.retry(ownerId, job.id)).toBeNull();
   });
 
+  it("finishes cancellation for a staged review or failed job", async () => {
+    await owner();
+    const repo = new DrizzleImportJobRepository();
+    for (const phase of ["received", "failed"] as const) {
+      const job = await repo.create({ ownerId, name: "Review", uploadPrefix: "staging/upload-private", totalBytes: 0, files: [] });
+      if (phase === "failed") await repo.forJob(ownerId, job.id).write({ phase, nextFile: 0, processedBytes: 0, totalBytes: 0, errorCode: "IMPORT_FAILED" });
+      expect(await repo.requestCancel(ownerId, job.id)).toBe(true);
+      await repo.markCancelled(ownerId, job.id);
+      expect(await repo.get(ownerId, job.id)).toMatchObject({ phase: "cancelled", cancelRequested: true });
+    }
+  });
+
   it("rejects job metadata that could escape its protected upload prefix", async () => {
     await owner();
     const repo = new DrizzleImportJobRepository();

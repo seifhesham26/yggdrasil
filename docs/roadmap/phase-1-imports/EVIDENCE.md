@@ -4,7 +4,16 @@ Last checked: 2026-09-24
 
 ## Current status
 
-Phase 1 is in progress. Tasks 1.1 and 1.2 are accepted. Task 1.3 remains open for reviewable variant resources and attribution; Task 1.4 awaits the final phase gate.
+Phase 1 is accepted. Tasks 1.1–1.4 passed their scoped acceptance checks. The private Mega Wyvern fixture remains optional and unavailable; broader FBX exporter fidelity and the full 1 GiB limit were not claimed.
+
+## Final Task 1.3–1.4 and Phase 1 gate — 2026-09-24
+
+- The staged-job review now validates package paths and file signatures, lists each candidate's glTF/GLB/OBJ resource references (including OBJ → MTL → texture), marks missing or incompatible models, and scopes license/credit files by folder. Root files apply to all candidates; sibling licenses do not. Missing, generic README-only, or conflicting attribution is **unknown**. FBX external links remain unverified. The owner confirms a candidate before the job runs; an unconfirmed staged job can be cancelled and removed.
+- An owner-scoped post-import switch verifies the retained source SHA-256, creates a new private preview version, stores its analysis, and updates the current version in a transaction. The original source rows and files remain untouched. The protected file route serves the retained license text and both preview versions. Unit, PGlite, route and UI tests cover candidate review, unsafe/missing paths, source preservation, owner denial and version history.
+- The final isolated PostgreSQL 18.4 gate used a **new empty** `yggdrasil_accept_20260924` database in the temporary loopback cluster. `pnpm db:migrate` applied every existing migration through `0006_variant_selection`; `pnpm db:generate` reported **no schema changes**. No configured owner database or storage root was used.
+- `pnpm test:e2e` passed **2 tests, 0 skipped** with the throwaway owner and temporary asset root. The owner browser imported/reopened glTF, the CC0 FBX cube, OBJ+MTL+PNG, a ZIP, and a **64 MiB** archive. The large archive's byte-identical retained copy was SHA-256 checked via 8 MiB protected range reads before and after page reload; the final focused browser run logged `7e9ceb556aabad6e9903947e2fbf880b83517d11b3264f59734be884e8d07578`. The same flow reviewed two model variants and license text before import, switched the preview afterwards, reopened the selected version, and confirmed the alternate source bytes did not change. It also exercised normalization, comparison, failed promotion, revert and retry. Test teardown removed only the throwaway owner and guarded temporary folders.
+- With the production build, `pnpm exec tsx scripts/restart-import-gate.ts` printed `RESTART_IMPORT_GATE_PASS` and `OPTIMIZATION_RESTART_GATE_PASS`. It confirmed a received job was **not** an asset, injected an expired staging checkpoint, killed and restarted the app, resumed the same job UUID into exactly one ready asset, and checked the uploaded model SHA-256 `cc8470d738c5991504a129d2231056a1a7189e00f429f9749b1f2e0414e9d792`. It then created a derived GLB, restarted again, reopened the same derived version ID and GLB, and rechecked the source hash.
+- Final quality suite: `pnpm test` **33 files, 189 passed, 1 optional private fixture skipped**; `pnpm test:e2e` **2 passed, 0 skipped**; `pnpm lint`, `pnpm typecheck`, `pnpm build` (Next.js 16.3.5), built-app restart gate, and `git diff --check` exited 0. `graphify update .` rebuilt 808 nodes and 1,876 edges; its optional SQL parser is absent, so SQL was verified through Drizzle and PostgreSQL. The private Mega Wyvern check could not run without `YGGDRASIL_PRIVATE_FIXTURE_DIR`. The 64 MiB browser case proves streaming and hash retention at that size, not peak RSS or every FBX exporter feature.
 
 ## Variant selection and app restart gate — 2026-09-24
 
@@ -56,7 +65,7 @@ Focused fixture verification on 2026-09-24:
 - Ponytail review of this task's diff: lean already; no new dependency, job layer, route branch, or database table was introduced.
 - This task proves ZIP retention in the existing import/service and protected-file boundaries. It does **not** prove persistence through a real database restart, optimization, large-package memory bounds, or the owner browser workflow; Phase 1 checkboxes remain open.
 
-## Remaining acceptance gaps
+## Earlier acceptance gaps recorded before the final gate
 
 - Broader licensed FBX exporter samples are still needed before claiming format-wide fidelity; the Task 1.1 gate covers the current documented parser boundary.
 - Need route/UI integration for persisted job progress, cancellation, retry, and explicit variant selection.

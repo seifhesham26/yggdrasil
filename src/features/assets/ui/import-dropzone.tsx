@@ -7,6 +7,7 @@ import { ArrowUpRight, FileArchive, FolderOpen, Layers3, UploadCloud } from "luc
 type UploadResult = { assetId: string; status: string };
 type Upload = (files: File[], onProgress: (sent: number, total: number) => void, signal: AbortSignal, onJob?: (jobId: string) => void) => Promise<UploadResult>;
 type JobStatus = { jobId: string; phase: string; assetId?: string | null; errorCode?: string | null; candidates?: string[]; processedBytes?: number; totalBytes?: number; leaseUntil?: string | null };
+type VariantReview = { candidates: Array<{ modelPath: string; resources: string[]; missingResources: string[]; problems: string[]; resourceInspection: "complete" | "unverified"; attributionFiles: string[]; attribution: "present" | "unknown"; selected: boolean }>; attributionFiles: Array<{ relativePath: string; text: string; truncated: boolean }> };
 const activeJobKey = "yggdrasil.activeImportJob";
 
 const errorMessages: Record<string, string> = {
@@ -26,9 +27,9 @@ const errorMessages: Record<string, string> = {
   IMPORT_CANCELLED: "Import cancelled.",
 };
 
-async function jobRequest(url: string, options?: RequestInit): Promise<JobStatus> {
+async function jobRequest<T = JobStatus>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, options);
-  const data = await response.json() as JobStatus & { code?: string };
+  const data = await response.json() as T & { code?: string };
   if (!response.ok) throw Object.assign(new Error(data.code ?? "Import failed"), { code: data.code ?? "IMPORT_FAILED", status: response.status });
   return data;
 }
@@ -78,7 +79,9 @@ function uploadToApi(files: File[], onProgress: (sent: number, total: number) =>
       } else {
         localStorage.setItem(activeJobKey, data.jobId);
         onJob?.(data.jobId);
-        void runJob(data.jobId).then(resolve, reject);
+        void jobRequest<VariantReview>(`/api/assets/import/jobs/${encodeURIComponent(data.jobId)}?view=review`)
+          .then((review) => reject(Object.assign(new Error("Review required"), { code: "VARIANT_REVIEW_REQUIRED", review })))
+          .catch(reject);
       }
     };
     xhr.onerror = () => { finish(); reject(new Error("Upload connection failed")); };
@@ -99,13 +102,14 @@ export function ImportDropzone({ upload = uploadToApi }: { upload?: Upload }) {
   const folderInput = useRef<HTMLInputElement>(null);
   const controller = useRef<AbortController | null>(null);
   const [files, setFiles] = useState<File[]>([]);
-  const [phase, setPhase] = useState<"empty" | "ready" | "uploading" | "processing" | "complete" | "error">("empty");
+  const [phase, setPhase] = useState<"empty" | "ready" | "uploading" | "review" | "processing" | "complete" | "error">("empty");
   const [progress, setProgress] = useState<{ sent: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [assetId, setAssetId] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [processingProgress, setProcessingProgress] = useState<JobStatus | null>(null);
   const [variantCandidates, setVariantCandidates] = useState<string[]>([]);
+  const [review, setReview] = useState<VariantReview | null>(null);
 
   useEffect(() => {
     folderInput.current?.setAttribute("webkitdirectory", "");
@@ -118,7 +122,15 @@ export function ImportDropzone({ upload = uploadToApi }: { upload?: Upload }) {
       if (!active) return;
       setJobId(saved);
       setPhase("processing");
-      void runJob(saved).then((result) => {
+      void jobRequest(`/api/assets/import/jobs/${encodeURIComponent(saved)}`).then(async (status) => {
+        if (status.phase === "received" || status.errorCode === "AMBIGUOUS_PRIMARY_MODEL") {
+          const next = await jobRequest<VariantReview>(`/api/assets/import/jobs/${encodeURIComponent(saved)}?view=review`);
+          if (active) { setReview(next); setPhase("review"); }
+          return null;
+        }
+        return runJob(saved);
+      }).then((result) => {
+        if (!result) return;
         if (!active) return;
         setAssetId(result.assetId);
         setPhase("complete");
@@ -156,10 +168,11 @@ export function ImportDropzone({ upload = uploadToApi }: { upload?: Upload }) {
     setJobId(null);
     setProcessingProgress(null);
     setVariantCandidates([]);
+    setReview(null);
   }
 
   async function submit() {
-    if (!files.length || phase === "uploading" || phase === "processing") return;
+    if (!files.length || phase === "uploading" || phase === "review" || phase === "processing") return;
     setPhase("uploading");
     setError(null);
     setProgress(null);
@@ -175,6 +188,11 @@ export function ImportDropzone({ upload = uploadToApi }: { upload?: Upload }) {
       router.refresh();
     } catch (reason) {
       const code = reason && typeof reason === "object" && "code" in reason ? String(reason.code) : "IMPORT_FAILED";
+      if (code === "VARIANT_REVIEW_REQUIRED" && reason && typeof reason === "object" && "review" in reason) {
+        setReview(reason.review as VariantReview);
+        setPhase("review");
+        return;
+      }
       setVariantCandidates(reason && typeof reason === "object" && "candidates" in reason && Array.isArray(reason.candidates) ? reason.candidates.map(String) : []);
       const detail = reason && typeof reason === "object" && "message" in reason && typeof reason.message === "string" ? reason.message : null;
       setError(reason instanceof DOMException && reason.name === "AbortError" ? "Upload cancelled." : code === "MISSING_DEPENDENCY" && detail ? detail : errorMessages[code] ?? errorMessages.IMPORT_FAILED);
@@ -190,6 +208,7 @@ export function ImportDropzone({ upload = uploadToApi }: { upload?: Upload }) {
     try {
       await jobRequest(`/api/assets/import/jobs/${encodeURIComponent(current)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "select-variant", selectedModelPath }) });
       setVariantCandidates([]);
+      setReview(null);
       setError(null);
       setPhase("processing");
       const result = await runJob(current);
@@ -209,8 +228,15 @@ export function ImportDropzone({ upload = uploadToApi }: { upload?: Upload }) {
     const current = jobId ?? localStorage.getItem(activeJobKey);
     if (!current) return;
     try {
-      await jobRequest(`/api/assets/import/jobs/${encodeURIComponent(current)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "cancel" }) });
-      setError("Cancelling import…");
+      const result = await jobRequest(`/api/assets/import/jobs/${encodeURIComponent(current)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "cancel" }) });
+      if (result.phase === "cancelled") {
+        localStorage.removeItem(activeJobKey);
+        setJobId(null);
+        setReview(null);
+        setVariantCandidates([]);
+        setError(null);
+        setPhase(files.length ? "ready" : "empty");
+      } else setError("Cancelling import…");
     } catch {
       setError("Could not cancel this import. Try again.");
     }
@@ -247,8 +273,8 @@ export function ImportDropzone({ upload = uploadToApi }: { upload?: Upload }) {
         <span className="import-step-mark" aria-hidden="true">01 / 08</span>
       </div>
 
-      <div className="drop-surface" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (phase !== "uploading" && phase !== "processing") select(Array.from(event.dataTransfer.files)); }}>
-        <button type="button" className="drop-trigger" onClick={() => filesInput.current?.click()} disabled={phase === "uploading" || phase === "processing"}>
+      <div className="drop-surface" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (phase !== "uploading" && phase !== "review" && phase !== "processing") select(Array.from(event.dataTransfer.files)); }}>
+        <button type="button" className="drop-trigger" onClick={() => filesInput.current?.click()} disabled={phase === "uploading" || phase === "review" || phase === "processing"}>
           <UploadCloud aria-hidden="true" size={30} strokeWidth={1.5} />
           <strong>Drop model files here</strong>
           <span>or use one of the choices below</span>
@@ -259,17 +285,17 @@ export function ImportDropzone({ upload = uploadToApi }: { upload?: Upload }) {
         <label className="file-choice">
           <Layers3 size={19} aria-hidden="true" />
           <span>Choose model files</span>
-          <input ref={filesInput} type="file" multiple accept=".gltf,.glb,.fbx,.obj,.mtl,.bin,.png,.jpg,.jpeg,.webp,.ktx2,.txt,.md" disabled={phase === "uploading" || phase === "processing"} onChange={(event) => select(Array.from(event.target.files ?? []))} />
+          <input ref={filesInput} type="file" multiple accept=".gltf,.glb,.fbx,.obj,.mtl,.bin,.png,.jpg,.jpeg,.webp,.ktx2,.txt,.md" disabled={phase === "uploading" || phase === "review" || phase === "processing"} onChange={(event) => select(Array.from(event.target.files ?? []))} />
         </label>
         <label className="file-choice">
           <FolderOpen size={19} aria-hidden="true" />
           <span>Choose folder</span>
-          <input ref={folderInput} type="file" multiple disabled={phase === "uploading" || phase === "processing"} onChange={(event) => select(Array.from(event.target.files ?? []))} />
+          <input ref={folderInput} type="file" multiple disabled={phase === "uploading" || phase === "review" || phase === "processing"} onChange={(event) => select(Array.from(event.target.files ?? []))} />
         </label>
         <label className="file-choice">
           <FileArchive size={19} aria-hidden="true" />
           <span>Choose ZIP</span>
-          <input type="file" accept=".zip" disabled={phase === "uploading" || phase === "processing"} onChange={(event) => select(Array.from(event.target.files ?? []))} />
+          <input type="file" accept=".zip" disabled={phase === "uploading" || phase === "review" || phase === "processing"} onChange={(event) => select(Array.from(event.target.files ?? []))} />
         </label>
       </div>
 
@@ -279,14 +305,29 @@ export function ImportDropzone({ upload = uploadToApi }: { upload?: Upload }) {
           {phase === "ready" ? <span>{files.length} {files.length === 1 ? "file" : "files"} ready · {(totalBytes / 1024 / 1024).toFixed(1)} MB</span> : null}
           {phase === "uploading" ? <span>{progress ? `Uploading ${(progress.sent / 1024 / 1024).toFixed(1)} of ${(progress.total / 1024 / 1024).toFixed(1)} MB…` : "Uploading your model…"}</span> : null}
           {phase === "processing" ? <span>{processingProgress ? `${processingProgress.phase === "staging" ? "Saving files" : processingProgress.phase === "committing" ? "Finishing import" : "Analyzing model"} · ${((processingProgress.processedBytes ?? 0) / 1024 / 1024).toFixed(1)} of ${((processingProgress.totalBytes ?? 0) / 1024 / 1024).toFixed(1)} MB` : "Analyzing your model…"}</span> : null}
+          {phase === "review" ? <span>Review the staged package before creating its preview.</span> : null}
           {phase === "complete" ? <span className="success-message">Import complete</span> : null}
           {phase === "error" ? <span role="alert">{error}</span> : null}
         </div>
+        {phase === "review" && review ? <div className="import-variants" aria-label="Model variants">
+          <strong>Select a model variant</strong>
+          {review.candidates.map((candidate) => <section key={candidate.modelPath}>
+            <h3>{candidate.modelPath}</h3>
+            <p>Required resources: {candidate.resources.length ? candidate.resources.join(", ") : "None listed or embedded"}</p>
+            {candidate.resourceInspection === "unverified" ? <p>External FBX resources could not be verified. Review the preview after import.</p> : null}
+            {candidate.missingResources.length ? <p>Missing resources: {candidate.missingResources.join(", ")}</p> : null}
+            {candidate.problems.length ? <p>Incompatible model: {candidate.problems.join(", ")}</p> : null}
+            <p>Attribution {candidate.attribution === "present" ? "provided, not verified" : "unknown"}. Files: {candidate.attributionFiles.length ? candidate.attributionFiles.join(", ") : "none"}.</p>
+            <button type="button" disabled={candidate.missingResources.length > 0 || candidate.problems.length > 0} onClick={() => selectVariant(candidate.modelPath)}>Use {candidate.modelPath}</button>
+          </section>)}
+          <div><strong>License and credit files</strong>{review.attributionFiles.length ? review.attributionFiles.map((file) => <div key={file.relativePath}><p>{file.relativePath}{file.truncated ? " (preview truncated)" : ""}</p><pre>{file.text}</pre></div>) : <p>None supplied. Attribution unknown.</p>}</div>
+        </div> : null}
         {phase === "error" && variantCandidates.length ? <div className="import-variants" aria-label="Model variants"><strong>Select a model variant</strong>{variantCandidates.map((candidate) => <button key={candidate} type="button" onClick={() => selectVariant(candidate)}>{candidate}</button>)}</div> : null}
         {phase === "uploading" ? <button type="button" onClick={() => controller.current?.abort()}>Cancel upload</button> : null}
+        {phase === "review" ? <button type="button" onClick={cancelProcessing}>Cancel staged import</button> : null}
         {phase === "processing" && upload === uploadToApi ? <button type="button" onClick={cancelProcessing}>Cancel import</button> : null}
         {phase === "error" && jobId && upload === uploadToApi ? <button type="button" onClick={retryJob}>Retry saved import</button> : null}
-        <button type="button" className="primary-button" disabled={!files.length || phase === "uploading" || phase === "processing"} onClick={submit}>
+        <button type="button" className="primary-button" disabled={!files.length || phase === "uploading" || phase === "review" || phase === "processing"} onClick={submit}>
           {phase === "uploading" || phase === "processing" ? "Importing…" : "Import asset"}
           {phase === "uploading" || phase === "processing" ? null : <ArrowUpRight size={17} aria-hidden="true" />}
         </button>

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { rm } from "node:fs/promises";
 import type { AssetStorage } from "@/lib/storage/types";
 import { parseStorageKey } from "@/lib/storage/storage-key";
 import { AssetImportError } from "../domain/errors";
@@ -41,6 +42,7 @@ export function createImportAsset(deps: {
 }) {
   return async function importAsset(request: ImportAssetRequest): Promise<ImportAssetResult> {
     const manifest = await deps.buildManifest(request.entries, request.selectedModelPath);
+    try {
     const importId = request.assetId ?? deps.createId();
     const stagedPrefix = parseStorageKey(`staging/${importId}`);
     const sourceFiles = [manifest.primaryModel, ...manifest.alternates, ...manifest.dependencies, ...manifest.attributionFiles, ...(manifest.archive ? [manifest.archive] : [])];
@@ -138,6 +140,9 @@ export function createImportAsset(deps: {
         throw new AssetImportError("IMPORT_FAILED", "Import failed and cleanup needs attention.");
       }
       throw new AssetImportError(code, "Import failed. Please check the model files and retry.");
+    }
+    } finally {
+      if (manifest.temporaryDirectory) await rm(manifest.temporaryDirectory, { recursive: true, force: true });
     }
   };
 }

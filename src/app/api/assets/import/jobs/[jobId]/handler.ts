@@ -1,5 +1,7 @@
 import { parseStorageKey } from "@/lib/storage/storage-key";
 import type { ImportJobRecord } from "@/features/assets/infrastructure/import-job-persistence";
+import type { VariantReview } from "@/features/assets/application/variant-review";
+import { AssetImportError } from "@/features/assets/domain/errors";
 
 type Session = { user: { id: string } } | null;
 type JobRepository = {
@@ -24,6 +26,7 @@ export function createImportJobHandler(deps: {
   getSession: (headers: Headers) => Promise<Session>;
   jobs: JobRepository;
   removeUpload: (prefix: ReturnType<typeof parseStorageKey>) => Promise<void>;
+  reviewJob?: (job: ImportJobRecord) => Promise<VariantReview>;
 }) {
   const authenticate = async (request: Request, jobId: string): Promise<{ response: Response; ownerId?: never; job?: never } | { response?: never; ownerId: string; job: ImportJobRecord }> => {
     const session = await deps.getSession(request.headers);
@@ -36,7 +39,13 @@ export function createImportJobHandler(deps: {
   return {
     async GET(request: Request, jobId: string): Promise<Response> {
       const found = await authenticate(request, jobId);
-      return found.response ?? Response.json(present(found.job));
+      if (found.response) return found.response;
+      if (new URL(request.url).searchParams.get("view") === "review" && deps.reviewJob) {
+        if (found.job.phase !== "received" && found.job.phase !== "failed") return Response.json({ code: "INVALID_JOB_STATE" }, { status: 409 });
+        try { return Response.json(await deps.reviewJob(found.job)); }
+        catch (error) { return Response.json({ code: error instanceof AssetImportError ? error.code : "IMPORT_FAILED" }, { status: 400 }); }
+      }
+      return Response.json(present(found.job));
     },
     async PATCH(request: Request, jobId: string): Promise<Response> {
       const found = await authenticate(request, jobId);
@@ -53,6 +62,14 @@ export function createImportJobHandler(deps: {
       if (action === "select-variant") {
         const selectedModelPath = input.selectedModelPath;
         if (typeof selectedModelPath !== "string" || !selectedModelPath) return Response.json({ code: "INVALID_REQUEST" }, { status: 400 });
+        if (deps.reviewJob) {
+          if (found.job.phase !== "received" && found.job.phase !== "failed") return Response.json({ code: "INVALID_JOB_STATE" }, { status: 409 });
+          let review: VariantReview;
+          try { review = await deps.reviewJob(found.job); }
+          catch (error) { return Response.json({ code: error instanceof AssetImportError ? error.code : "IMPORT_FAILED" }, { status: 400 }); }
+          const candidate = review.candidates.find((item) => item.modelPath === selectedModelPath);
+          if (!candidate || candidate.missingResources.length || candidate.problems.length) return Response.json({ code: candidate ? candidate.problems.length ? "INVALID_FILE" : "MISSING_DEPENDENCY" : "INVALID_JOB_STATE" }, { status: 409 });
+        }
         const updated = await deps.jobs.selectVariant(found.ownerId, jobId, selectedModelPath);
         return updated ? Response.json(present(updated)) : Response.json({ code: "INVALID_JOB_STATE" }, { status: 409 });
       }

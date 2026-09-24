@@ -1,6 +1,6 @@
 # Task 1.4 — Import integration and recovery
 
-**Status:** [ ] In progress. **Depends on:** Tasks 1.1–1.3.
+**Status:** [x] Accepted on 2026-09-24. **Depends on:** Tasks 1.1–1.3.
 
 **Outcome:** The broader import flow is usable end to end, including failure recovery, without weakening the existing GLTF/GLB path.
 
@@ -8,11 +8,11 @@
 
 **Acceptance:**
 
-- [ ] Browser tests cover successful FBX, OBJ, and ZIP imports plus an interrupted retry.
-- [ ] Original package hashes match input; incomplete jobs are distinguishable from completed assets.
-- [ ] Existing GLTF/GLB import tests and viewer checks still pass.
-- [ ] `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm test:e2e`, and `pnpm build` pass.
+- [x] Browser tests cover successful FBX, OBJ, and ZIP imports plus an interrupted retry.
+- [x] Original package hashes match input; incomplete jobs are distinguishable from completed assets.
+- [x] Existing GLTF/GLB import tests and viewer checks still pass.
+- [x] `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm test:e2e`, and `pnpm build` pass.
 
 **Evidence to record:** exact commands/results, known format limitations, documentation link, commit.
 
-**Current evidence:** The isolated owner Playwright flow passes for glTF, CC0 FBX and OBJ packages, ZIP source retention, and variant selection. A separate Windows gate restarts the built app with an expired staged job and verifies browser resume, one asset, and unchanged source hash. Final acceptance remains open until Task 1.3 and the Phase 1 gate close. See [evidence](EVIDENCE.md) and [local development](../../development.md).
+**Current evidence:** The isolated owner Playwright flow passes for glTF, CC0 FBX and OBJ packages, ZIP source retention, a 64 MiB archive, variant review and switching, and optimization recovery. A separate Windows gate restarts the built app with an expired staged job, verifies browser resume, exactly one asset, and unchanged source hash; it then restarts again and reopens a derived optimization version. All five quality commands passed. See [exact evidence](EVIDENCE.md) and [local development](../../development.md).

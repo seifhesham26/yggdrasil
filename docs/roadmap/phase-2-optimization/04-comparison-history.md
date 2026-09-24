@@ -1,6 +1,6 @@
 # Task 2.4 — Comparison, history, and recovery
 
-**Status:** In progress; route/component checks pass, authenticated browser acceptance is open. **Depends on:** Tasks 2.1–2.3.
+**Status:** Accepted for the implemented normalization and remove-unused operations. **Depends on:** Tasks 2.1–2.3.
 
 **Outcome:** The owner can compare source and derived versions, inspect applied operations, and revert the selected version without destroying history.
 
@@ -9,10 +9,10 @@
 **Acceptance:**
 
 - [x] Comparison clearly distinguishes estimates from measured results (component tests).
-- [ ] Revert restores a prior preview/configuration while retaining later versions in history.
+- [x] Revert restores a prior preview/configuration while retaining later versions in history.
 - [x] Failed operations are visible with retry information but do not appear as valid versions.
-- [ ] Full lint, typecheck, unit/integration, browser, and build checks pass.
+- [x] Full lint, typecheck, unit/integration, browser, and build checks pass.
 
 **Evidence to record:** acceptance run, sample metrics, documentation and commit.
 
-See [current evidence](EVIDENCE.md). The browser workflow is implemented in `e2e/import-flow.spec.ts` but was skipped without an isolated database. The full browser gate and visual restore/reopen acceptance are not checked off.
+See [current evidence](EVIDENCE.md). The owner browser applied an operation, compared versions, reverted, retried a failed promotion, and reopened the selected preview. The broader Task 2.3 operation set remains open.

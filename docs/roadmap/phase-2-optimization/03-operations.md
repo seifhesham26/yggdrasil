@@ -15,4 +15,4 @@
 
 **Likely touchpoints:** new processing modules, job records, analysis service, asset detail UI. **Evidence to record:** output validation and fidelity caveats.
 
-See [current evidence](EVIDENCE.md) for the narrow extension allowlist and unsupported capabilities. Visual browser acceptance and the wider operation set in the outcome remain open; these checkmarks describe only the implemented contract.
+See [current evidence](EVIDENCE.md) for the narrow extension allowlist and unsupported capabilities. The owner browser accepted and ran the supported operation path. Texture resizing/compression, geometry/mesh compression, and lower-detail variants remain unimplemented; these checkmarks describe only the implemented contract, so Task 2.3 stays open.

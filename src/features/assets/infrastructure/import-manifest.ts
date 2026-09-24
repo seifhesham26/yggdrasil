@@ -125,7 +125,7 @@ function uint32(view: DataView, offset: number): number {
   return view.getUint32(offset, true);
 }
 
-function expandZip(archive: Uint8Array): ImportFile[] {
+export function expandZip(archive: Uint8Array): ImportFile[] {
   const view = new DataView(archive.buffer, archive.byteOffset, archive.byteLength);
   let end = -1;
   for (let offset = archive.length - 22; offset >= Math.max(0, archive.length - 65_557); offset--) {
@@ -216,7 +216,7 @@ function expandZip(archive: Uint8Array): ImportFile[] {
   });
 }
 
-async function expandZipFile(archive: FileBackedImportFile): Promise<FileBackedImportFile[]> {
+export async function expandZipFile(archive: FileBackedImportFile): Promise<FileBackedImportFile[]> {
   const zip = await yauzl.openPromise(archive.path, { autoClose: false, strictFileNames: true, validateEntrySizes: true }).catch((error: unknown) => {
     fail("INVALID_ARCHIVE", `ZIP could not be opened: ${error instanceof Error ? error.message : "unknown error"}`);
   });
@@ -259,6 +259,7 @@ async function expandZipFile(archive: FileBackedImportFile): Promise<FileBackedI
       if (byteSize !== entry.uncompressedSize) fail("INVALID_ARCHIVE", `ZIP entry size disagrees: ${name}`);
       files.push({ relativePath: name, path, byteSize, sha256: hash.digest("hex") });
     }
+    if (!files.length) fail("NO_PRIMARY_MODEL", "ZIP contains no model files");
     return files;
   } catch (error) {
     await rm(directory, { recursive: true, force: true });
@@ -269,10 +270,10 @@ async function expandZipFile(archive: FileBackedImportFile): Promise<FileBackedI
   }
 }
 
-export function buildImportManifest(entries: ImportFile[], selectedModelPath?: string): Promise<ImportManifest>;
-export function buildImportManifest(entries: FileBackedImportFile[], selectedModelPath?: string): Promise<ImportManifest<FileBackedImportFile>>;
-export function buildImportManifest(entries: ImportSource[], selectedModelPath?: string): Promise<ImportManifest<ImportSource>>;
-export async function buildImportManifest(entries: ImportSource[], selectedModelPath?: string): Promise<ImportManifest<ImportSource>> {
+export function buildImportManifest(entries: ImportFile[], selectedModelPath?: string, options?: { validateDependencies?: boolean; validateModelContent?: boolean }): Promise<ImportManifest>;
+export function buildImportManifest(entries: FileBackedImportFile[], selectedModelPath?: string, options?: { validateDependencies?: boolean; validateModelContent?: boolean }): Promise<ImportManifest<FileBackedImportFile>>;
+export function buildImportManifest(entries: ImportSource[], selectedModelPath?: string, options?: { validateDependencies?: boolean; validateModelContent?: boolean }): Promise<ImportManifest<ImportSource>>;
+export async function buildImportManifest(entries: ImportSource[], selectedModelPath?: string, options?: { validateDependencies?: boolean; validateModelContent?: boolean }): Promise<ImportManifest<ImportSource>> {
   if (entries.length === 0) fail("NO_PRIMARY_MODEL", "No files were provided");
   if (entries.length > MAX_ENTRIES) fail("ARCHIVE_LIMIT_EXCEEDED", "Import contains too many files");
   const zipEntries = entries.filter((entry) => extension(entry.relativePath) === ".zip");
@@ -283,6 +284,8 @@ export async function buildImportManifest(entries: ImportSource[], selectedModel
   if (total > MAX_EXPANDED_BYTES) fail("ARCHIVE_LIMIT_EXCEEDED", "Import source package exceeds the byte limit");
   const archive = zipEntries.length ? { ...zipEntries[0], relativePath: validateName(zipEntries[0].relativePath, true) } : undefined;
   const files = archive ? "bytes" in archive ? expandZip(archive.bytes) : await expandZipFile(archive) : entries;
+  const temporaryDirectory = archive && "path" in archive && files.length && "path" in files[0] ? dirname(files[0].path) : undefined;
+  try {
   const normalized: ImportSource[] = [];
   const seen = new Set<string>();
   for (const entry of files) {
@@ -302,10 +305,10 @@ export async function buildImportManifest(entries: ImportSource[], selectedModel
     if (signature && expectedMime[ext] && signature.mime !== expectedMime[ext]) {
       fail("INVALID_FILE", `File signature does not match extension: ${relativePath}`);
     }
-    if (ext === ".glb" && (head.length < 4 || decoder.decode(head.subarray(0, 4)) !== "glTF")) {
+    if (options?.validateModelContent !== false && ext === ".glb" && (head.length < 4 || decoder.decode(head.subarray(0, 4)) !== "glTF")) {
       fail("INVALID_FILE", `Invalid GLB header: ${relativePath}`);
     }
-    if (ext === ".gltf") {
+    if (options?.validateModelContent !== false && ext === ".gltf") {
       try {
         const document: unknown = JSON.parse(decoder.decode(await readImportBytes(entry)));
         if (!document || typeof document !== "object" || !("asset" in document) || !document.asset || typeof document.asset !== "object" || !("version" in document.asset) || typeof document.asset.version !== "string" || !document.asset.version.startsWith("2.")) {
@@ -316,10 +319,10 @@ export async function buildImportManifest(entries: ImportSource[], selectedModel
         fail("INVALID_FILE", `Invalid glTF JSON: ${relativePath}`);
       }
     }
-    if (ext === ".obj") {
+    if (options?.validateModelContent !== false && ext === ".obj") {
       try { decoder.decode(await readImportBytes(entry)); } catch { fail("INVALID_FILE", `Malformed OBJ model: ${relativePath}`); }
     }
-    if (ext === ".fbx") validateFbx(relativePath, head);
+    if (options?.validateModelContent !== false && ext === ".fbx") validateFbx(relativePath, head);
     normalized.push({ ...entry, relativePath });
   }
   const models = normalized.filter((entry) => modelExtensions.has(extension(entry.relativePath)));
@@ -328,7 +331,7 @@ export async function buildImportManifest(entries: ImportSource[], selectedModel
   if (selectedModelPath && !models.some((entry) => entry.relativePath === selectedModelPath)) fail("INVALID_FILE", `Selected model is not present in the package: ${selectedModelPath}`);
   const primary = selectedModelPath ? models.find((entry) => entry.relativePath === selectedModelPath)! : models[0];
   const byPath = new Map(normalized.map((entry) => [entry.relativePath, entry]));
-  if (extension(primary.relativePath) === ".obj") await validateObjDependencies(primary, byPath);
+  if (options?.validateDependencies !== false && extension(primary.relativePath) === ".obj") await validateObjDependencies(primary, byPath);
   return {
     primaryModel: primary,
     alternates: models.filter((entry) => entry !== primary),
@@ -337,5 +340,10 @@ export async function buildImportManifest(entries: ImportSource[], selectedModel
     attributionFiles: normalized.filter((entry) => attributionExtensions.has(extension(entry.relativePath))),
     thumbnails: normalized.filter((entry) => imageExtensions.has(extension(entry.relativePath))),
     warnings: [],
+    temporaryDirectory,
   };
+  } catch (error) {
+    if (temporaryDirectory) await rm(temporaryDirectory, { recursive: true, force: true });
+    throw error;
+  }
 }

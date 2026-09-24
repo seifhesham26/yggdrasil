@@ -3,6 +3,7 @@ import { db } from "@/db/client";
 import { assetFiles, assetSources, assets, assetVersions, sceneAnalyses } from "@/db/schema/assets";
 import type { AssetAnalysis } from "../domain/types";
 import { DrizzleOptimizationPersistence } from "./optimization-persistence";
+import { variantSourcePath } from "../application/variant-switch";
 
 export type StoredAssetFile = {
   relativePath: string;
@@ -106,7 +107,8 @@ export class DrizzleAssetRepository implements AssetRepository {
     // Version rows are the manifest for generated single-file GLBs. Source package
     // files remain separate so all original dependencies and attribution survive.
     const retainedFiles: StoredAssetFile[] = history?.versions.map((version) => files.find((file) => file.storageKey === version.storageKey) ?? {
-      relativePath: "model.glb", storageKey: version.storageKey, byteSize: version.byteSize, sha256: version.sha256, mimeType: "model/gltf-binary", role: "model" as const,
+      relativePath: version.operation === "variant" && version.storageKey.endsWith(".gltf") ? variantSourcePath(version.storageKey) ?? "model.gltf" : "model.glb",
+      storageKey: version.storageKey, byteSize: version.byteSize, sha256: version.sha256, mimeType: version.storageKey.endsWith(".gltf") ? "model/gltf+json" : "model/gltf-binary", role: "model" as const,
     }) ?? [];
     const primary = retainedFiles.find((file) => file.storageKey === selected?.storageKey);
     const analysis = selected?.analysis ?? null;

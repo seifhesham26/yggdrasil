@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -135,6 +135,21 @@ describe("createImportAsset", () => {
       mimeType: "application/zip", role: "source",
     }));
     expect(deps.files.get(`assets/${assetId}/source/folder/triangle.gltf`)).toEqual(model.bytes);
+  });
+
+  it("removes temporary ZIP extraction after a file-backed import", async () => {
+    const root = await mkdtemp(join(tmpdir(), "yggdrasil-zip-import-test-"));
+    try {
+      const archiveBytes = zipSync({ "folder/triangle.gltf": model.bytes, "folder/triangle.bin": binary.bytes });
+      const path = join(root, "archive.part");
+      await writeFile(path, archiveBytes);
+      const archive = { relativePath: "bundle.zip", path, byteSize: archiveBytes.byteLength, sha256: createHash("sha256").update(archiveBytes).digest("hex") };
+      const deps = fakes();
+      deps.analyze.mockResolvedValueOnce(analysis);
+      await createImportAsset({ ...deps, buildManifest: buildImportManifest, createId: () => "import-1" })({ ownerId: "owner-1", name: "Triangle", entries: [archive] });
+      expect((await readdir(root)).filter((name) => name.startsWith("expanded-"))).toEqual([]);
+      expect(await readFile(path)).toEqual(Buffer.from(archiveBytes));
+    } finally { await rm(root, { recursive: true, force: true }); }
   });
 
   it("stores an OBJ source beside a normalized GLB and analyzes the normalized file", async () => {

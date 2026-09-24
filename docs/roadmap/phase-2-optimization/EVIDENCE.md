@@ -1,8 +1,16 @@
 # Phase 2 optimization evidence
 
-Last checked: 2026-09-24. **Phase acceptance remains open.**
+Last checked: 2026-09-24. **Phase acceptance remains open because Task 2.3's wider operation set is unimplemented.** Tasks 2.1, 2.2 and the comparison/recovery flow for supported operations passed their acceptance gates.
 
-## Verified scope
+## Isolated owner browser and restart acceptance — 2026-09-24
+
+- A fresh, empty `yggdrasil_accept_20260924` database in a temporary loopback PostgreSQL 18.4 cluster received all existing migrations through `0006_variant_selection`; schema generation reported no changes. The configured owner database and storage root were not used.
+- `pnpm test:e2e` passed **2 tests, 0 skipped**. The owner browser reviewed findings, approved normalization, saw measured comparison metrics and the derived preview, exercised failed promotion/retry, reverted to the original while retaining history, and reopened the selected version. The import flow also checked source bytes and protected derived file access. The final large-archive browser run logged SHA-256 `7e9ceb556aabad6e9903947e2fbf880b83517d11b3264f59734be884e8d07578` for the retained 64 MiB ZIP.
+- Against a production build and the same isolated PostgreSQL database, `pnpm exec tsx scripts/restart-import-gate.ts` printed `RESTART_IMPORT_GATE_PASS` and `OPTIMIZATION_RESTART_GATE_PASS`. It restarted the app twice, reopened the original and derived version IDs and the derived GLB, and confirmed the uploaded source SHA-256 remained `cc8470d738c5991504a129d2231056a1a7189e00f429f9749b1f2e0414e9d792`.
+- The full unit/integration, lint, typecheck, and build gates passed as recorded in [Phase 1 final evidence](../phase-1-imports/EVIDENCE.md). This closes the earlier browser and process-restart gaps below. The optional private Mega Wyvern fixture was unavailable.
+- Texture resizing/compression, geometry/mesh compression, and lower-detail variants are explicitly unsupported, with tested warnings. The complete Phase 2 outcome remains open until these operations and their fidelity/visual gates are implemented.
+
+## Earlier fixture and adapter scope
 
 Fixtures use generated glTF bytes, guarded temporary storage, and an embedded PostgreSQL engine (PGlite) migrated with the project's real SQL migrations. No configured database, owner account, source upload, private model, or configured storage root was modified.
 
@@ -31,7 +39,7 @@ The adapter tests execute real Drizzle queries, PostgreSQL constraints, transact
 - Controls show the current version, operation outcomes, measured comparison table and a separate comparison preview. Failed HTTP and network requests report errors and release the busy state.
 - Supported processor fixtures preserve required material extensions, base color, clearcoat parameters and animation. Unknown optional/required extensions and missing images are rejected. Outputs are reopened and reanalyzed before promotion.
 
-## Executed checks
+## Earlier executed checks
 
 | Command | Result |
 | --- | --- |
@@ -48,8 +56,8 @@ Focused red/green runs covered adapter rollback/backfill/provenance, delayed sel
 
 Graph refresh completed through the installed Python module with `PYTHONHASHSEED=0` after the Windows launcher failed: 682 nodes, 1,377 edges. Graphify reports a missing optional SQL parser; this does not affect executed migration/SQL tests.
 
-## Acceptance still required
+## Earlier acceptance gaps, closed by the isolated gate above
 
-`e2e/import-flow.spec.ts` now contains the full owner import/apply/compare/failed-promotion/revert/retry/reopen workflow, source-byte verification, derived file fetches and viewer-version assertions. It requires an explicitly configured **empty, isolated** `YGGDRASIL_E2E_DATABASE_URL`, all migrations applied, and a PostgreSQL role able to create the temporary failure trigger. It was skipped here because that variable is unset; the main database opt-in is also unset. It is a present but unexecuted acceptance test, not a missing test or a passing workflow.
+At the earlier fixture-only checkpoint, `e2e/import-flow.spec.ts` contained the owner import/apply/compare/failed-promotion/revert/retry/reopen workflow but was skipped because the isolated database variable was unset. The isolated owner browser run above executed it successfully.
 
-The external PostgreSQL/Neon driver, process-restart durability and authenticated browser workflow remain unverified. Embedded PostgreSQL and route/component tests do not close those gates. No commit was made; coordinator review and commit remain pending.
+At that checkpoint, external PostgreSQL, process-restart durability, and the authenticated browser workflow were unverified. The temporary PostgreSQL cluster and built-app gate above verify those paths locally; a Neon service run is not claimed.

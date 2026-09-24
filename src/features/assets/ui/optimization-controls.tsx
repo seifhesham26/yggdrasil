@@ -58,7 +58,7 @@ export function OptimizationControls({ assetId, sourceFiles = [] }: { assetId: s
   const compare = history?.versions.find((version) => version.id === compareId);
   const recommendation = history?.report.findings.find((finding) => finding.operation === "normalize");
   const failed = history?.attempts.filter((attempt) => attempt.status === "failed").findLast((attempt) => !history.attempts.some((retry) => retry.retryOf === attempt.id && retry.status === "succeeded"));
-  const compareFile = compare?.operation === "original" ? sourceFiles.find((file) => file.storageKey === compare.storageKey) : compare ? { relativePath: "model.glb", storageKey: compare.storageKey } : undefined;
+  const compareFile = compare?.operation === "original" ? sourceFiles.find((file) => file.storageKey === compare.storageKey) : compare ? { relativePath: compare.operation === "variant" && compare.storageKey.endsWith(".gltf") ? compare.storageKey.split("/variants/").at(-1)?.split("/").slice(1).join("/") ?? "model.gltf" : "model.glb", storageKey: compare.storageKey } : undefined;
   const metrics = current && compare ? [
     ["Model bytes", current.byteSize, compare.byteSize],
     ["Triangles", current.analysis.counts.triangles, compare.analysis.counts.triangles],
@@ -92,7 +92,7 @@ export function OptimizationControls({ assetId, sourceFiles = [] }: { assetId: s
           {metrics.map(([name, value, compared]) => <tr key={name}><th>{name}</th><td>{value.toLocaleString()}</td><td>{compared.toLocaleString()}</td></tr>)}
         </tbody></table>
         <p>The report preview shows the current version. Comparison preview: {compare.operation}.</p>
-        {compareFile ? <section aria-label="Comparison preview"><ModelCanvasLoader key={compare.id} modelUrl={`/api/assets/${assetId}/file?key=${encodeURIComponent(compare.storageKey)}`} primaryRelativePath={compareFile.relativePath} files={compare.operation === "original" ? sourceFiles : [compareFile]} /></section> : null}
+        {compareFile ? <section aria-label="Comparison preview"><ModelCanvasLoader key={compare.id} modelUrl={`/api/assets/${assetId}/file?key=${encodeURIComponent(compare.storageKey)}`} primaryRelativePath={compareFile.relativePath} files={compare.operation === "original" || compare.operation === "variant" ? sourceFiles : [compareFile]} /></section> : null}
       </div> : null}
       {history.attempts.length ? <ol aria-label="Optimization operation history">{history.attempts.map((attempt) => <li key={attempt.id}>{attempt.operation}: {attempt.status}{attempt.retryOf ? " (retry)" : ""}{attempt.error ? ` — ${attempt.error}` : ""}</li>)}</ol> : null}
     </> : null}

@@ -1,15 +1,15 @@
 # Phase 2 — Reversible optimization
 
-**Status:** In progress. **Depends on:** Phase 1 accepted (Phase 1 remains planned; this work is fixture- and schema-only until that gate is accepted).
+**Status:** In progress. **Depends on:** Phase 1 accepted.
 
 Goal: explain web-performance risks and offer owner-approved, non-destructive improvements. No optimization runs automatically on import.
 
-Review fixes are implemented and verified with generated fixtures, embedded PostgreSQL, real route wiring and component tests. The authenticated browser workflow and external PostgreSQL restart gate remain open. See [the current evidence and limitations](EVIDENCE.md).
+Findings, version persistence, and comparison/recovery pass fixture, isolated PostgreSQL, authenticated browser, and built-app restart checks. The wider operation set in Task 2.3 is still open. See [the current evidence and limitations](EVIDENCE.md).
 
-- [ ] [2.1 — Findings and recommendations](01-recommendations.md)
-- [ ] [2.2 — Derived asset versions](02-versions.md)
+- [x] [2.1 — Findings and recommendations](01-recommendations.md)
+- [x] [2.2 — Derived asset versions](02-versions.md)
 - [ ] [2.3 — Optimization operations](03-operations.md)
-- [ ] [2.4 — Comparison, history, and recovery](04-comparison-history.md)
+- [x] [2.4 — Comparison, history, and recovery](04-comparison-history.md)
 
 **Phase exit:** The owner can inspect a recommendation's reason, estimated benefit, visual/compatibility trade-off, and affected resources; apply it to a new version; compare versions; and return to a previous version. Original bytes remain unchanged.
 

@@ -54,6 +54,45 @@ describe("ImportDropzone", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/more than one model/i);
   });
 
+  it("shows resources and uncertain attribution before confirming a staged variant", async () => {
+    const user = userEvent.setup();
+    const review = { candidates: [
+      { modelPath: "low/model.gltf", resources: ["low/triangle.bin"], missingResources: [], problems: [], resourceInspection: "complete", attributionFiles: ["README.md"], attribution: "unknown", selected: false },
+      { modelPath: "high/model.gltf", resources: [], missingResources: ["high/missing.bin"], problems: [], resourceInspection: "complete", attributionFiles: ["README.md"], attribution: "unknown", selected: false },
+    ], attributionFiles: [{ relativePath: "README.md", text: "Terms unclear", truncated: false }] };
+    const upload = vi.fn(async (_files: File[], _progress: unknown, _signal: AbortSignal, onJob?: (jobId: string) => void) => {
+      onJob?.("job-1");
+      throw Object.assign(new Error("Review required"), { code: "VARIANT_REVIEW_REQUIRED", review });
+    });
+    render(<ImportDropzone upload={upload} />);
+    await user.upload(screen.getByLabelText("Choose model files"), new File(["{}"], "model.gltf"));
+    await user.click(screen.getByRole("button", { name: "Import asset" }));
+    expect(await screen.findByLabelText("Model variants")).toHaveTextContent("low/triangle.bin");
+    expect(screen.getByLabelText("Model variants")).toHaveTextContent("high/missing.bin");
+    expect(screen.getByLabelText("Model variants")).toHaveTextContent("Attribution unknown");
+    expect(screen.getByText("Terms unclear")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Use high/model.gltf" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Use low/model.gltf" })).toBeEnabled();
+  });
+
+  it("cancels an unconfirmed staged job and returns to the selected files", async () => {
+    const user = userEvent.setup();
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ phase: "cancelled" }), { status: 200 }));
+    const upload = vi.fn(async (_files: File[], _progress: unknown, _signal: AbortSignal, onJob?: (jobId: string) => void) => {
+      onJob?.("job-1");
+      throw Object.assign(new Error("Review required"), { code: "VARIANT_REVIEW_REQUIRED", review: { candidates: [{ modelPath: "model.gltf", resources: [], missingResources: [], problems: [], resourceInspection: "complete", attributionFiles: [], attribution: "unknown", selected: false }], attributionFiles: [] } });
+    });
+    render(<ImportDropzone upload={upload} />);
+    await user.upload(screen.getByLabelText("Choose model files"), new File(["{}"], "model.gltf"));
+    await user.click(screen.getByRole("button", { name: "Import asset" }));
+    await screen.findByLabelText("Model variants");
+    await user.click(screen.getByRole("button", { name: "Cancel staged import" }));
+    expect(fetch).toHaveBeenCalledWith("/api/assets/import/jobs/job-1", expect.objectContaining({ method: "PATCH" }));
+    expect(await screen.findByRole("button", { name: "Import asset" })).toBeEnabled();
+    expect(screen.queryByLabelText("Model variants")).not.toBeInTheDocument();
+    fetch.mockRestore();
+  });
+
   it("disables controls while an upload is pending", async () => {
     const user = userEvent.setup();
     let resolveUpload!: (value: { assetId: string; status: string }) => void;

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -133,6 +133,12 @@ describe("buildImportManifest", () => {
     expect(manifest.primaryModel.relativePath).toBe("folder/hero.glb");
     expect(await readFile(manifest.primaryModel.path)).toEqual(Buffer.from(glb));
     expect(await readFile(archive.path)).toEqual(Buffer.from(original));
+  });
+
+  it("removes temporary extracted files if ZIP validation fails", async () => {
+    const archive = await diskFile("invalid.zip", zipSync({ "folder/bad.gltf": bytes('{"asset":{"version":"1.0"}}') }));
+    await expect(buildImportManifest([archive])).rejects.toMatchObject({ code: "INVALID_FILE" });
+    expect((await readdir(join(archive.path, ".."))).filter((name) => name.startsWith("expanded-"))).toEqual([]);
   });
 
   it("rejects a file-backed ZIP symlink without altering the archive", async () => {

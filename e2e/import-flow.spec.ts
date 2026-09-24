@@ -1,7 +1,8 @@
 import { expect, test } from "@playwright/test";
+import { createHash, randomBytes } from "node:crypto";
 import { Client } from "pg";
 import { zipSync } from "fflate";
-import { readFile, realpath, rm } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { createGltfFixture } from "../src/test/fixtures/create-gltf-fixture";
@@ -70,6 +71,8 @@ test("owner imports models, reopens previews, and completes optimization workflo
     page.getByRole("button", { name: "Import asset" }).click(),
   ]);
   expect(response.status(), await response.text()).toBe(202);
+  await expect(page.getByText("Select a model variant")).toBeVisible();
+  await page.getByRole("button", { name: "Use triangle.gltf" }).click();
   await expect(page.getByText("Import complete")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("1 mesh")).toBeVisible();
   await expect(page.getByText("1 animation")).toBeVisible();
@@ -77,6 +80,7 @@ test("owner imports models, reopens previews, and completes optimization workflo
   await page.getByRole("link", { name: "Open asset report" }).click();
   await expect(page.getByRole("img", { name: "3D model preview" })).toBeVisible();
   await expect(page.getByText("No destructive changes applied", { exact: false })).toBeVisible();
+  await expect(page.getByText("Attribution unknown", { exact: false })).toBeVisible();
 
   const assetId = new URL(page.url()).pathname.split("/").at(-1)!;
   const endpoint = `/api/assets/${assetId}/optimization`;
@@ -161,6 +165,8 @@ test("owner imports models, reopens previews, and completes optimization workflo
       ]);
       expect(importResponse.status(), await importResponse.text()).toBe(202);
       const { jobId } = await importResponse.json() as { jobId: string };
+      await expect(page.getByText("Select a model variant")).toBeVisible();
+      await page.getByRole("button", { name: `Use ${fixture.model}` }).click();
       await expect(page.getByText("Import complete")).toBeVisible();
       const { assetId: importedId } = await (await page.request.get(`/api/assets/import/jobs/${jobId}`)).json() as { assetId: string };
       await page.getByRole("link", { name: "Open asset report" }).click();
@@ -198,6 +204,8 @@ test("owner imports models, reopens previews, and completes optimization workflo
     ]);
     expect(importResponse.status(), await importResponse.text()).toBe(202);
     const { jobId } = await importResponse.json() as { jobId: string };
+    await expect(page.getByText("Select a model variant")).toBeVisible();
+    await page.getByRole("button", { name: "Use folder/triangle.gltf" }).click();
     await expect(page.getByText("Import complete")).toBeVisible();
     const { assetId: zipAssetId } = await (await page.request.get(`/api/assets/import/jobs/${jobId}`)).json() as { assetId: string };
     await page.getByRole("link", { name: "Open asset report" }).click();
@@ -208,6 +216,51 @@ test("owner imports models, reopens previews, and completes optimization workflo
     await page.reload();
     await expect(page.getByRole("progressbar", { name: "Loading model" })).toBeHidden({ timeout: 30_000 });
     expect(await (await page.request.get(archiveFile)).body()).toEqual(Buffer.from(archive));
+  });
+
+  await test.step("stream and reopen a 64 MiB archive with its original hash", async () => {
+    const payload = randomBytes(64 * 1024 * 1024);
+    const archive = zipSync({ "large/triangle.gltf": model.bytes, "large/triangle.bin": binary.bytes, "large/payload.bin": payload }, { level: 0 });
+    const expectedHash = createHash("sha256").update(archive).digest("hex");
+    console.log(`LARGE_ARCHIVE_SHA256=${expectedHash}`);
+    const fixtureRoot = await mkdtemp(join(tmpdir(), "yggdrasil-large-fixture-"));
+    const archivePath = join(fixtureRoot, "large.zip");
+    try {
+    await writeFile(archivePath, archive);
+    await page.goto("/library");
+    await page.getByLabel("Choose ZIP").setInputFiles(archivePath);
+    const [uploadResponse] = await Promise.all([
+      page.waitForResponse((candidate) => candidate.url().endsWith("/api/assets/import/jobs")),
+      page.getByRole("button", { name: "Import asset" }).click(),
+    ]);
+    expect(uploadResponse.status(), await uploadResponse.text()).toBe(202);
+    const { jobId } = await uploadResponse.json() as { jobId: string };
+    await expect(page.getByText("Select a model variant")).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("button", { name: "Use large/triangle.gltf" }).click();
+    await expect(page.getByText("Import complete")).toBeVisible({ timeout: 90_000 });
+    const completed = await (await page.request.get(`/api/assets/import/jobs/${jobId}`)).json() as { assetId: string; phase: string };
+    expect(completed.phase).toBe("completed");
+    const archiveUrl = `/api/assets/${completed.assetId}/file?key=${encodeURIComponent(`assets/${completed.assetId}/source/large.zip`)}`;
+    const storedHash = async () => {
+      const hash = createHash("sha256");
+      for (let start = 0; start < archive.byteLength; start += 8 * 1024 * 1024) {
+        const end = Math.min(archive.byteLength - 1, start + 8 * 1024 * 1024 - 1);
+        const part = await page.request.get(archiveUrl, { headers: { Range: `bytes=${start}-${end}` } });
+        expect(part.status()).toBe(206);
+        hash.update(await part.body());
+      }
+      return hash.digest("hex");
+    };
+    expect(await storedHash()).toBe(expectedHash);
+    await page.getByRole("link", { name: "Open asset report" }).click();
+    await page.reload();
+    await expect(page.getByRole("progressbar", { name: "Loading model" })).toBeHidden({ timeout: 30_000 });
+    expect(await storedHash()).toBe(expectedHash);
+    } finally {
+      const target = await realpath(fixtureRoot);
+      if (dirname(target) !== resolve(tmpdir()) || !basename(target).startsWith("yggdrasil-large-fixture-")) throw new Error("Refusing to remove an unexpected large-fixture folder.");
+      await rm(target, { recursive: true, force: true });
+    }
   });
 
   await test.step("select and reopen one model from an ambiguous package", async () => {
@@ -226,14 +279,19 @@ test("owner imports models, reopens previews, and completes optimization workflo
     expect(uploadResponse.status(), await uploadResponse.text()).toBe(202);
     const { jobId: variantJobId } = await uploadResponse.json() as { jobId: string };
     await expect(page.getByText("Select a model variant")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByLabel("Model variants")).toContainText("low/triangle.bin");
+    await expect(page.getByLabel("Model variants")).toContainText("high/triangle.bin");
+    await expect(page.getByLabel("Model variants")).toContainText("CC0 fixture attribution");
     const pending = await (await page.request.get(`/api/assets/import/jobs/${variantJobId}`)).json();
-    expect(pending).toMatchObject({ phase: "failed", errorCode: "AMBIGUOUS_PRIMARY_MODEL", candidates: ["low/model.gltf", "high/model.gltf"] });
-    await page.getByLabel("Model variants").getByRole("button", { name: "high/model.gltf" }).click();
+    expect(pending).toMatchObject({ phase: "received", selectedModelPath: null });
+    await page.getByLabel("Model variants").getByRole("button", { name: "Use high/model.gltf" }).click();
     await expect(page.getByText("Import complete")).toBeVisible({ timeout: 30_000 });
     const completed = await (await page.request.get(`/api/assets/import/jobs/${variantJobId}`)).json();
     expect(completed).toMatchObject({ phase: "completed", selectedModelPath: "high/model.gltf" });
     await page.getByRole("link", { name: "Open asset report" }).click();
     const selectedAssetId = new URL(page.url()).pathname.split("/").at(-1)!;
+    await expect(page.getByRole("link", { name: "LICENSE.txt" })).toBeVisible();
+    await expect(page.getByText("Attribution provided, not verified", { exact: false })).toBeVisible();
     const history = await (await page.request.get(`/api/assets/${selectedAssetId}/optimization?view=history`)).json();
     expect(history.versions[0].storageKey).toBe(`assets/${selectedAssetId}/source/high/model.gltf`);
     for (const file of ["low/model.gltf", "low/triangle.bin", "high/model.gltf", "high/triangle.bin", "LICENSE.txt"]) {
@@ -241,5 +299,15 @@ test("owner imports models, reopens previews, and completes optimization workflo
     }
     const license = await (await page.request.get(`/api/assets/${selectedAssetId}/file?key=${encodeURIComponent(`assets/${selectedAssetId}/source/LICENSE.txt`)}`)).body();
     expect(license.toString()).toBe("CC0 fixture attribution");
+    const beforeSwitch = await (await page.request.get(`/api/assets/${selectedAssetId}/file?key=${encodeURIComponent(`assets/${selectedAssetId}/source/low/model.gltf`)}`)).body();
+    await page.getByRole("button", { name: "Use low/model.gltf" }).click();
+    await expect(page.getByRole("region", { name: "Model preview", exact: true })).not.toHaveAttribute("data-version-id", history.versions[0].id);
+    await page.reload();
+    await expect(page.getByText("low/model.gltf Current preview")).toBeVisible();
+    const afterSwitch = await (await page.request.get(`/api/assets/${selectedAssetId}/file?key=${encodeURIComponent(`assets/${selectedAssetId}/source/low/model.gltf`)}`)).body();
+    expect(afterSwitch).toEqual(beforeSwitch);
+    const switched = await (await page.request.get(`/api/assets/${selectedAssetId}/optimization?view=history`)).json();
+    expect(switched.versions.map((version: { operation: string }) => version.operation)).toEqual(["original", "variant"]);
+    expect((await page.request.get(`/api/assets/${selectedAssetId}/file?key=${encodeURIComponent(switched.versions[1].storageKey)}`)).status()).toBe(200);
   });
 });

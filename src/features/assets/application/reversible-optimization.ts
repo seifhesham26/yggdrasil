@@ -14,7 +14,7 @@ export type OptimizationVersion = {
   sha256: string;
   byteSize: number;
   analysis: AssetAnalysis;
-  operation: OptimizationOperation | "original";
+  operation: OptimizationOperation | "original" | "variant";
   createdAt: Date;
 };
 export type OptimizationSettings = { keepExtras: boolean };

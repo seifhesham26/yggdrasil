@@ -81,9 +81,12 @@ try {
   const uploaded = await uploadResponse;
   if (uploaded.status() !== 202) throw new Error(`Job upload failed: ${uploaded.status()} ${await uploaded.text()}`);
   const { jobId } = await uploaded.json() as { jobId: string };
+  await page.getByText("Select a model variant").waitFor();
+  await page.getByRole("button", { name: `Use ${model.relativePath}` }).click();
   await page.getByRole("alert").filter({ hasText: "could not be saved" }).waitFor();
   const pending = await (await page.request.get(`/api/assets/import/jobs/${jobId}`)).json() as { phase: string };
   if (pending.phase !== "received") throw new Error(`Expected a received job before restart; got ${pending.phase}`);
+  if ((await client.query<{ count: string }>("select count(*) from assets where id = $1", [jobId])).rows[0].count !== "0") throw new Error("Unfinished job appeared as a library asset.");
   if (await page.evaluate(() => localStorage.getItem("yggdrasil.activeImportJob")) !== jobId) throw new Error("Browser did not retain the job ID.");
 
   // Model a process stop after its first durable checkpoint. The expired
@@ -99,10 +102,34 @@ try {
   if (completed.phase !== "completed" || completed.assetId !== jobId) throw new Error("Restarted job did not complete on its original asset ID.");
   const fileUrl = `/api/assets/${jobId}/file?key=${encodeURIComponent(`assets/${jobId}/source/${model.relativePath}`)}`;
   const stored = await (await page.request.get(fileUrl)).body();
-  if (createHash("sha256").update(stored).digest("hex") !== createHash("sha256").update(model.bytes).digest("hex")) throw new Error("Restart changed the original model bytes.");
+  const sourceHash = createHash("sha256").update(model.bytes).digest("hex");
+  if (createHash("sha256").update(stored).digest("hex") !== sourceHash) throw new Error("Restart changed the original model bytes.");
   const assetCount = (await client.query<{ count: string }>("select count(*) from assets where id = $1", [jobId])).rows[0].count;
   if (assetCount !== "1") throw new Error(`Expected one asset after restart; found ${assetCount}.`);
   console.log("RESTART_IMPORT_GATE_PASS: expired staged job resumed after app restart; one asset and unchanged source hash.");
+  console.log(`RESTART_SOURCE_SHA256=${sourceHash}`);
+
+  await page.goto(`/assets/${jobId}`);
+  const originalHistory = await (await page.request.get(`/api/assets/${jobId}/optimization?view=history`)).json() as { versions: Array<{ id: string }> };
+  if (originalHistory.versions.length !== 1) throw new Error("Expected exactly one retained original before optimization.");
+  const originalVersionId = originalHistory.versions[0].id;
+  const promotion = page.waitForResponse((response) => response.url().endsWith(`/api/assets/${jobId}/optimization`) && response.request().method() === "POST");
+  await page.getByRole("button", { name: "Approve normalization" }).click();
+  const promoted = await promotion;
+  if (promoted.status() !== 200) throw new Error(`Normalization failed: ${promoted.status()} ${await promoted.text()}`);
+  const derived = await promoted.json() as { id: string; storageKey: string };
+  await stopServer();
+  await startServer();
+  await page.reload();
+  await page.locator(".asset-preview-section[data-version-id]").waitFor({ timeout: 30_000 });
+  if (await page.locator(".asset-preview-section").getAttribute("data-version-id") !== derived.id) throw new Error("Restart did not restore the selected derived version ID.");
+  const reopenedHistory = await (await page.request.get(`/api/assets/${jobId}/optimization?view=history`)).json() as { versions: Array<{ id: string }>; currentVersionId: string };
+  if (reopenedHistory.currentVersionId !== derived.id || reopenedHistory.versions.length !== 2 || reopenedHistory.versions[0].id !== originalVersionId || reopenedHistory.versions[1].id !== derived.id) throw new Error("Restart did not retain both version IDs and current selection.");
+  const reopened = await page.request.get(`/api/assets/${jobId}/file?key=${encodeURIComponent(derived.storageKey)}`);
+  if (reopened.status() !== 200 || (await reopened.body()).subarray(0, 4).toString() !== "glTF") throw new Error("Restart did not reopen the derived GLB.");
+  const originalReopened = await (await page.request.get(fileUrl)).body();
+  if (createHash("sha256").update(originalReopened).digest("hex") !== createHash("sha256").update(model.bytes).digest("hex")) throw new Error("Optimization restart changed source bytes.");
+  console.log("OPTIMIZATION_RESTART_GATE_PASS: derived version ID and GLB reopened; original source hash unchanged.");
 } finally {
   await browser?.close();
   await stopServer();

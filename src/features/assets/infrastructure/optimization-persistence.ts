@@ -17,7 +17,7 @@ async function retainedVersion(tx: Transaction, assetId: string, versionId: stri
   const [row] = await tx.select({ version: assetVersions }).from(assetVersions)
     .innerJoin(sceneAnalyses, eq(sceneAnalyses.versionId, assetVersions.id))
     .leftJoin(optimizationOperations, and(eq(optimizationOperations.id, assetVersions.operationId), eq(optimizationOperations.assetId, assetId), eq(optimizationOperations.status, "succeeded")))
-    .where(and(eq(assetVersions.id, versionId), eq(assetVersions.assetId, assetId), or(eq(assetVersions.kind, "original"), isNotNull(optimizationOperations.id))));
+    .where(and(eq(assetVersions.id, versionId), eq(assetVersions.assetId, assetId), or(eq(assetVersions.kind, "original"), eq(assetVersions.kind, "converted"), isNotNull(optimizationOperations.id))));
   if (!row) throw new Error("Asset version is not available to this owner.");
   return row.version;
 }
@@ -83,10 +83,10 @@ export class DrizzleOptimizationPersistence implements OptimizationPersistence {
         .innerJoin(sceneAnalyses, eq(sceneAnalyses.versionId, assetVersions.id))
         .leftJoin(optimizationOperations, and(eq(optimizationOperations.id, assetVersions.operationId), eq(optimizationOperations.assetId, assetId), eq(optimizationOperations.status, "succeeded")))
         .where(eq(assetVersions.assetId, assetId)).orderBy(asc(assetVersions.createdAt));
-      const versions: OptimizationVersion[] = rows.filter(({ version, operation }) => version.kind === "original" || operation !== null).map(({ version, analysis, operation }) => ({
+      const versions: OptimizationVersion[] = rows.filter(({ version, operation }) => version.kind === "original" || version.kind === "converted" || operation !== null).map(({ version, analysis, operation }) => ({
         id: version.id, assetId, ownerId, parentVersionId: version.parentVersionId ?? version.id,
         storageKey: parseStorageKey(version.storageKey), sha256: version.sha256, byteSize: version.byteSize, analysis,
-        operation: version.kind === "original" ? "original" : operation as OptimizationOperation, createdAt: version.createdAt,
+        operation: version.kind === "original" ? "original" : version.kind === "converted" ? "variant" : operation as OptimizationOperation, createdAt: version.createdAt,
       }));
       let currentVersionId = asset.currentVersionId ?? undefined;
       if (!currentVersionId) {

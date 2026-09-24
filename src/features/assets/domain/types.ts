@@ -11,6 +11,7 @@ export type ImportManifest<T extends ImportSource = ImportFile> = {
   attributionFiles: T[];
   thumbnails: T[];
   warnings: Array<{ code: string; message: string }>;
+  temporaryDirectory?: string;
 };
 
 export type AssetAnalysis = {

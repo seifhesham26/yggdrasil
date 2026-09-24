@@ -63,7 +63,7 @@ export class DrizzleImportJobRepository {
 
   async markCancelled(ownerId: string, jobId: string): Promise<void> {
     const [job] = await db.update(importJobs).set({ phase: "cancelled", cancelRequested: true, leaseUntil: null, updatedAt: new Date() })
-      .where(and(eq(importJobs.id, jobId), eq(importJobs.ownerId, ownerId), eq(importJobs.cancelRequested, false), inArray(importJobs.phase, ["received", "staging", "analyzing", "failed"]))).returning({ id: importJobs.id });
+      .where(and(eq(importJobs.id, jobId), eq(importJobs.ownerId, ownerId), eq(importJobs.cancelRequested, true), inArray(importJobs.phase, ["received", "staging", "analyzing", "failed"]))).returning({ id: importJobs.id });
     if (!job) throw new Error("Import job cannot be cancelled");
   }
 
@@ -87,7 +87,7 @@ export class DrizzleImportJobRepository {
 
   async requestCancel(ownerId: string, jobId: string): Promise<boolean> {
     const [updated] = await db.update(importJobs).set({ cancelRequested: true, updatedAt: new Date() })
-      .where(and(eq(importJobs.id, jobId), eq(importJobs.ownerId, ownerId), eq(importJobs.cancelRequested, false), inArray(importJobs.phase, ["received", "staging", "analyzing"]))).returning({ id: importJobs.id });
+      .where(and(eq(importJobs.id, jobId), eq(importJobs.ownerId, ownerId), eq(importJobs.cancelRequested, false), inArray(importJobs.phase, ["received", "staging", "analyzing", "failed"]))).returning({ id: importJobs.id });
     return Boolean(updated);
   }
 
@@ -100,10 +100,10 @@ export class DrizzleImportJobRepository {
 
   async selectVariant(ownerId: string, jobId: string, selectedModelPath: string): Promise<ImportJobRecord | null> {
     const current = await this.get(ownerId, jobId);
-    if (!current?.candidates.includes(selectedModelPath)) return null;
+    if (!current || current.phase === "failed" && !current.candidates.includes(selectedModelPath)) return null;
     const [job] = await db.update(importJobs).set({
       phase: "received", nextFile: 0, processedBytes: 0, errorCode: null, selectedModelPath, cancelRequested: false, updatedAt: new Date(),
-    }).where(and(eq(importJobs.id, jobId), eq(importJobs.ownerId, ownerId), eq(importJobs.phase, "failed"), eq(importJobs.errorCode, "AMBIGUOUS_PRIMARY_MODEL"))).returning();
+    }).where(and(eq(importJobs.id, jobId), eq(importJobs.ownerId, ownerId), or(eq(importJobs.phase, "received"), and(eq(importJobs.phase, "failed"), eq(importJobs.errorCode, "AMBIGUOUS_PRIMARY_MODEL"))))).returning();
     return job ?? null;
   }
 }

@@ -163,6 +163,16 @@ a { color: inherit; text-decoration: none; }
 .optimization-controls li { padding: 8px 0; border-bottom: 1px solid var(--soft-line); overflow-wrap: anywhere; }
 .optimization-controls li[aria-current] { font-weight: 700; }
 .optimization-controls strong { margin: 0 12px; }
+.import-variants { display: grid; gap: 14px; width: 100%; padding: 18px; border: 1px solid var(--line); border-radius: 10px; }
+.import-variants section { padding: 12px 0; border-top: 1px solid var(--soft-line); overflow-wrap: anywhere; }
+.import-variants h3 { margin: 0 0 8px; font-size: 14px; }
+.import-variants p { margin: 6px 0; line-height: 1.5; }
+.import-variants pre { max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.variant-controls { margin-top: 18px; }
+.variant-controls h2 { margin: 0 0 10px; font-family: var(--serif); font-size: 35px; }
+.variant-controls li { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 10px 0; border-top: 1px solid var(--soft-line); overflow-wrap: anywhere; }
+.variant-controls button, .import-variants button { padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); font: inherit; }
+.variant-controls button:disabled, .import-variants button:disabled { opacity: .5; cursor: not-allowed; }
 .version-comparison { margin-top: 20px; overflow-x: auto; }
 .version-comparison table { width: 100%; border-collapse: collapse; margin-bottom: 20px; text-align: left; }
 .version-comparison th, .version-comparison td { padding: 10px; border-bottom: 1px solid var(--soft-line); }
