@@ -1,15 +1,16 @@
 import { expect, test } from "@playwright/test";
 import { Client } from "pg";
-import { realpath, rm } from "node:fs/promises";
+import { readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { createGltfFixture } from "../src/test/fixtures/create-gltf-fixture";
 
 const email = process.env.YGGDRASIL_E2E_OWNER_EMAIL;
 const name = process.env.YGGDRASIL_E2E_OWNER_NAME;
 const password = process.env.YGGDRASIL_E2E_OWNER_PASSWORD;
 const assetRoot = process.env.YGGDRASIL_E2E_ASSET_ROOT;
-const databaseUrl = process.env.YGGDRASIL_E2E_DATABASE_URL ?? process.env.DATABASE_URL;
+const isolatedDatabaseUrl = process.env.YGGDRASIL_E2E_DATABASE_URL;
+const databaseUrl = isolatedDatabaseUrl && isolatedDatabaseUrl !== process.env.DATABASE_URL ? isolatedDatabaseUrl : undefined;
 
 test.beforeAll(async () => {
   if (!email || !name || !password || !databaseUrl) return;
@@ -46,9 +47,9 @@ test.afterAll(async () => {
   }
 });
 
-test("owner imports, applies, compares, reverts, retries, and reopens optimization", async ({ page }) => {
-  test.skip(!email || !name || !password || !databaseUrl, "Set YGGDRASIL_E2E_DATABASE_URL or YGGDRASIL_E2E_USE_MAIN_DATABASE=1");
-  test.setTimeout(120_000);
+test("owner imports models, reopens previews, and completes optimization workflow", async ({ page, request }) => {
+  test.skip(!email || !name || !password || !databaseUrl, "Set YGGDRASIL_E2E_DATABASE_URL to a separate empty PostgreSQL database");
+  test.setTimeout(180_000);
 
   await page.goto("/sign-in");
   await expect(page.getByRole("heading", { name: "Create your studio account." })).toBeVisible();
@@ -143,4 +144,45 @@ test("owner imports, applies, compares, reverts, retries, and reopens optimizati
   expect(finalHistory.attempts.at(-1)).toMatchObject({ retryOf: failedAttempt.id, versionId: retried.id, status: "succeeded" });
   expect(await (await page.request.get(sourceURL)).body()).toEqual(sourceBefore);
   expect((await page.request.get(derivedURL)).status()).toBe(200);
+
+  const fixtureDir = resolve("src/test/fixtures/phase-1");
+  const fixtures = [
+    { model: "cube.fbx", files: ["cube.fbx"], triangles: "12", warning: "FBX conversion uses Three.js FBXLoader" },
+    { model: "painted-panel.obj", files: ["painted-panel.obj", "painted-panel.mtl", "checker.png"], triangles: "2", warning: "OBJ material references are retained" },
+  ];
+  for (const fixture of fixtures) {
+    await test.step(`import and reopen ${fixture.model}`, async () => {
+      await page.goto("/library");
+      await page.getByLabel("Choose model files").setInputFiles(fixture.files.map((file) => join(fixtureDir, file)));
+      const [importResponse] = await Promise.all([
+        page.waitForResponse((candidate) => candidate.url().endsWith("/api/assets/import")),
+        page.getByRole("button", { name: "Import asset" }).click(),
+      ]);
+      expect(importResponse.status(), await importResponse.text()).toBe(201);
+      const { assetId: importedId } = await importResponse.json() as { assetId: string };
+      await expect(page.getByText("Import complete")).toBeVisible();
+      await page.getByRole("link", { name: "Open asset report" }).click();
+      await expect(page).toHaveURL(new RegExp(`/assets/${importedId}$`));
+      await expect(page.locator(".analysis-counts div").filter({ hasText: "Triangles" })).toContainText(fixture.triangles);
+      await expect(page.getByText(fixture.warning, { exact: false })).toBeVisible();
+      await expect(page.getByRole("img", { name: "3D model preview" })).toBeVisible();
+      await expect(page.getByRole("progressbar", { name: "Loading model" })).toBeHidden({ timeout: 30_000 });
+
+      const fileUrl = (file: string) => `/api/assets/${importedId}/file?key=${encodeURIComponent(`assets/${importedId}/source/${file}`)}`;
+      for (const file of fixture.files) {
+        const source = await page.request.get(fileUrl(file));
+        expect(source.status()).toBe(200);
+        expect(await source.body()).toEqual(await readFile(join(fixtureDir, file)));
+      }
+      const normalized = await page.request.get(fileUrl(`__normalized/${fixture.model.replace(/\.[^.]+$/, ".glb")}`));
+      expect(normalized.status()).toBe(200);
+      expect((await normalized.body()).subarray(0, 4).toString()).toBe("glTF");
+      expect((await request.get(fileUrl(fixture.model))).status()).toBe(401);
+
+      await page.reload();
+      await expect(page.locator(".analysis-counts div").filter({ hasText: "Triangles" })).toContainText(fixture.triangles);
+      await expect(page.getByRole("progressbar", { name: "Loading model" })).toBeHidden({ timeout: 30_000 });
+      expect(await (await page.request.get(fileUrl(fixture.model))).body()).toEqual(await readFile(join(fixtureDir, fixture.model)));
+    });
+  }
 });

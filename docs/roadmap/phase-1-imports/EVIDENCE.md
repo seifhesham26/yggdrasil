@@ -48,7 +48,16 @@ Focused fixture verification on 2026-09-24:
 
 ## Remaining acceptance gaps
 
-- Need legal representative FBX and OBJ+MTL+texture fixtures with licenses and a browser import/reopen check using isolated synthetic owner data.
+- Need the FBX and OBJ+MTL+texture browser import/reopen check using isolated synthetic owner data. Broader licensed exporter samples are still needed before claiming format-wide fidelity.
 - Need route/UI integration for persisted job progress, cancellation, retry, and explicit variant selection.
 - Need a database migration and isolated end-to-end recovery run proving source hashes and incomplete-vs-complete states.
 - Existing GLTF/GLB path is covered by the current unit and smoke suites, but the full Phase 1 acceptance suite is not yet present.
+
+## Task 1.1 redistributable fixtures and browser gate — 2026-09-24
+
+- Added original, [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) fixtures in `src/test/fixtures/phase-1/`: an ASCII FBX cube and an OBJ quad with MTL and 2×2 PNG texture. The fixture README records authorship, content, and converter limitations. No owner upload or third-party asset was used.
+- SHA-256: `cube.fbx` `83d7df92994218f06d057c48baa5f5e37ef10d1fc716e290f91d2f3e47c8af07`; `painted-panel.obj` `e812dd8c14781b285cd25b54bcdd740b6d4b58bebb8c035e7dd97d48481f6e90`; `painted-panel.mtl` `ac86a68714f1fc9bf1911ad01b43ed5aee5790a394594eb781e912fa5abce1d5`; `checker.png` `f78324a3d1694c16d07b199eeae7738382a488185cebfd4633a5929aba9da24f`.
+- Red check: focused converter test failed on two missing committed fixture paths. Green check: the same test passed with real FBX and OBJ fixtures; GLB inspection found 12 cube triangles and two panel triangles, dependencies remained present, warnings remained explicit, and input bytes were unchanged. Redundant inline synthetic conversion cases were removed in the Ponytail pass.
+- Extended `e2e/import-flow.spec.ts` to import both fixtures through the owner browser, inspect triangle counts and fidelity warnings, wait for the viewer, retrieve byte-identical source files and normalized GLBs through the protected route, deny an anonymous file request, and reopen each asset after page reload. The test requires `YGGDRASIL_E2E_DATABASE_URL` distinct from `DATABASE_URL` and an empty migrated PostgreSQL database.
+- `pnpm test:e2e`: smoke passed; the owner workflow, including the new FBX/OBJ browser steps, was skipped because no isolated PostgreSQL URL was configured. Docker and `pg_ctl` were also unavailable. The browser import/reopen gate is **unverified**, so Task 1.1 and Phase 1 remain open. The fixtures cover the current parser boundary but do not represent the range of FBX exporter features.
+- Final checks: `pnpm test` passed (23 files, 135 passed, 1 skipped); `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `git diff --check` passed. `graphify update .` completed with `PYTHONHASHSEED=0` and refreshed the ignored graph output; it skipped the model fixture formats because they are not classified as graph code or documents. Ponytail review found no further removable complexity after replacing the duplicated inline converter cases.
