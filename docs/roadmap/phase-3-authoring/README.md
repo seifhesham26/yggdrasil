@@ -1,6 +1,6 @@
 # Phase 3 — Appearance, scene, and interactions
 
-**Status:** Planned. **Depends on:** Phase 2 accepted.
+**Status:** In progress. **Depends on:** Phase 2 accepted.
 
 Goal: create non-destructive, saved presentation configuration around a chosen asset version. Editing is desktop-first, with basic tablet review.
 

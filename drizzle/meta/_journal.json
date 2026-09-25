@@ -50,6 +50,13 @@
       "when": 1790250000000,
       "tag": "0006_variant_selection",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790315518289,
+      "tag": "0007_nebulous_silhouette",
+      "breakpoints": true
     }
   ]
 }
