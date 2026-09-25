@@ -12,6 +12,20 @@ afterEach(resetTestDatabase);
 afterAll(() => postgres.close());
 
 describe("DrizzleProjectRepository", () => {
+  it("lists only projects for the owner and asset, and can undo the first save", async () => {
+    const asset = await importedFixture();
+    const repository = new DrizzleProjectRepository();
+    const created = await repository.create({ ownerId, assetId: asset.assetId, name: "First" });
+    const saved = await repository.save({ ownerId, projectId: created.project.id, expectedRevision: 0, snapshot: { ...defaultProjectSnapshot(), scene: { ...defaultProjectSnapshot().scene, background: "#123456" } }, activeStep: "Scene" });
+    expect((await repository.listForAsset(ownerId, asset.assetId)).map((project) => project.id)).toEqual([created.project.id]);
+    expect(await repository.listForAsset("other-owner", asset.assetId)).toEqual([]);
+    expect((await repository.undo(ownerId, saved.project.id)).project.snapshot).toEqual(defaultProjectSnapshot());
+    expect((await repository.redo(ownerId, saved.project.id)).project.snapshot.scene.background).toBe("#123456");
+    await repository.undo(ownerId, saved.project.id);
+    await repository.save({ ownerId, projectId: created.project.id, expectedRevision: 1, snapshot: { ...defaultProjectSnapshot(), scene: { ...defaultProjectSnapshot().scene, background: "#654321" } }, activeStep: "Scene" });
+    await repository.undo(ownerId, saved.project.id);
+    expect((await repository.redo(ownerId, saved.project.id)).project.snapshot.scene.background).toBe("#654321");
+  });
   it("persists typed snapshots and a monotonic revision cursor across undo, redo, and branch saves", async () => {
     const asset = await importedFixture();
     const repository = new DrizzleProjectRepository();

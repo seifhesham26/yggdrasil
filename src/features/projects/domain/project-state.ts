@@ -9,6 +9,7 @@ const Vector3 = z.tuple([z.number().finite(), z.number().finite(), z.number().fi
 const AppearanceOverride = z.object({
   visible: z.boolean().optional(), position: Vector3.optional(), rotation: Vector3.optional(), scale: Vector3.optional(),
   color: hexColor.optional(), opacity: z.number().min(0).max(1).optional(), roughness: z.number().min(0).max(1).optional(), metalness: z.number().min(0).max(1).optional(),
+  materialSourceNodeId: z.string().min(1).optional(), textureSourceNodeId: z.union([z.string().min(1), z.null()]).optional(),
 }).strict();
 const SceneSettings = z.object({
   background: hexColor, environment: z.enum(["none", "studio", "outdoor"]), exposure: z.number().min(-5).max(5),
@@ -24,7 +25,6 @@ const Interaction = z.object({
     z.object({ type: z.literal("show-annotation"), annotation: z.string().min(1).max(2000) }).strict(),
   ]),
 }).strict();
-
 export const ProjectSnapshotSchema = z.object({
   schemaVersion: z.literal(1), appearance: z.object({ nodes: z.record(z.string(), AppearanceOverride) }).strict(), scene: SceneSettings,
   interactions: z.array(Interaction).max(200), animation: z.object({ clips: z.array(z.record(z.string(), z.unknown())).max(200), timelines: z.array(z.record(z.string(), z.unknown())).max(50) }).strict(),

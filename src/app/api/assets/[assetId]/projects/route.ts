@@ -10,6 +10,11 @@ const handler = createProjectHandler({
   history: new ProjectHistory(new DrizzleProjectRepository()),
 });
 
+export async function GET(request: Request, context: { params: Promise<{ assetId: string }> }): Promise<Response> {
+  const { assetId } = await context.params;
+  return handler.GET(assetId, request);
+}
+
 export async function POST(request: Request, context: { params: Promise<{ assetId: string }> }): Promise<Response> {
   const { assetId } = await context.params;
   return handler.POST(assetId, request);

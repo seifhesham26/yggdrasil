@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db/client";
 import { assets, assetVersions } from "@/db/schema/assets";
 import { projectRevisions, projects, projectSteps } from "@/db/schema/projects";
@@ -31,6 +31,10 @@ async function stateFor(tx: Transaction, row: typeof projects.$inferSelect): Pro
 }
 
 export class DrizzleProjectRepository implements ProjectRepository {
+  async listForAsset(ownerId: string, assetId: string): Promise<Project[]> {
+    const rows = await db.select().from(projects).where(and(eq(projects.ownerId, ownerId), eq(projects.assetId, assetId))).orderBy(asc(projects.createdAt));
+    return rows.map(projectRecord);
+  }
   async create(input: { ownerId: string; assetId: string; name?: string }): Promise<ProjectState> {
     return db.transaction(async (tx) => {
       const [asset] = await tx.select({ id: assets.id, currentVersionId: assets.currentVersionId }).from(assets)
@@ -79,10 +83,10 @@ export class DrizzleProjectRepository implements ProjectRepository {
       const project = await ownedProject(tx, ownerId, projectId, true);
       if (!project.currentRevisionId) throw new Error("No project revision is available to undo.");
       const [current] = await tx.select().from(projectRevisions).where(and(eq(projectRevisions.id, project.currentRevisionId), eq(projectRevisions.projectId, project.id)));
-      if (!current?.parentRevisionId) throw new Error("No earlier project revision is available.");
-      const [parent] = await tx.select().from(projectRevisions).where(and(eq(projectRevisions.id, current.parentRevisionId), eq(projectRevisions.projectId, project.id)));
-      if (!parent) throw new Error("Project revision history is incomplete.");
-      const [updated] = await tx.update(projects).set({ currentRevisionId: parent.id, snapshot: parent.snapshot, updatedAt: new Date() }).where(eq(projects.id, project.id)).returning();
+      if (!current) throw new Error("Project revision history is incomplete.");
+      const [parent] = current.parentRevisionId ? await tx.select().from(projectRevisions).where(and(eq(projectRevisions.id, current.parentRevisionId), eq(projectRevisions.projectId, project.id))) : [null];
+      if (current.parentRevisionId && !parent) throw new Error("Project revision history is incomplete.");
+      const [updated] = await tx.update(projects).set({ currentRevisionId: parent?.id ?? null, snapshot: parent?.snapshot ?? defaultProjectSnapshot(), updatedAt: new Date() }).where(eq(projects.id, project.id)).returning();
       return stateFor(tx, updated);
     });
   }
@@ -91,7 +95,7 @@ export class DrizzleProjectRepository implements ProjectRepository {
     return db.transaction(async (tx) => {
       const project = await ownedProject(tx, ownerId, projectId, true);
       const current = project.currentRevisionId;
-      const children = await tx.select().from(projectRevisions).where(and(eq(projectRevisions.projectId, project.id), current ? eq(projectRevisions.parentRevisionId, current) : eq(projectRevisions.revision, 1))).orderBy(asc(projectRevisions.revision));
+      const children = await tx.select().from(projectRevisions).where(and(eq(projectRevisions.projectId, project.id), current ? eq(projectRevisions.parentRevisionId, current) : isNull(projectRevisions.parentRevisionId))).orderBy(asc(projectRevisions.revision));
       const child = children.at(-1);
       if (!child) throw new Error("No later project revision is available to redo.");
       const [updated] = await tx.update(projects).set({ currentRevisionId: child.id, snapshot: child.snapshot, updatedAt: new Date() }).where(eq(projects.id, project.id)).returning();

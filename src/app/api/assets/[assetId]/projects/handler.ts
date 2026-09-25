@@ -6,9 +6,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function createProjectHandler(deps: {
   getSession: (headers: Headers) => Promise<{ user: { id: string } } | null>;
-  history: Pick<ProjectHistory, "create">;
+  history: Pick<ProjectHistory, "create" | "listForAsset">;
 }) {
   return {
+    async GET(assetId: string, request: Request): Promise<Response> {
+      const session = await deps.getSession(request.headers);
+      if (!session) return Response.json({ code: "UNAUTHORIZED" }, { status: 401 });
+      try {
+        const projects = await deps.history.listForAsset(session.user.id, assetId);
+        return Response.json({ projects: projects.map(({ id, name, assetVersionId, activeStep, updatedAt }) => ({ id, name, assetVersionId, activeStep, updatedAt })) });
+      } catch {
+        return Response.json({ code: "PROJECT_STORAGE_UNAVAILABLE", message: "Projects could not be loaded. Retry." }, { status: 503 });
+      }
+    },
     async POST(assetId: string, request: Request): Promise<Response> {
       const session = await deps.getSession(request.headers);
       if (!session) return Response.json({ code: "UNAUTHORIZED" }, { status: 401 });

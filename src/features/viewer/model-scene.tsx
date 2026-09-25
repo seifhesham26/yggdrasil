@@ -1,13 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useFrame } from "@react-three/fiber";
+import { useFrame, useThree } from "@react-three/fiber";
 import { useBounds } from "@react-three/drei";
 import { AnimationMixer, BufferGeometry, LoadingManager, Material, type Object3D, Texture } from "three";
 import { GLTFLoader, type GLTF } from "three/addons/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 import { clone as cloneSkeleton } from "three/addons/utils/SkeletonUtils.js";
 import type { ViewerFile } from "./model-canvas";
+import type { ProjectSnapshot } from "@/features/projects/domain/project-state";
+import { applyAppearance, indexSceneParts, summarizePart, type PartSummary } from "@/features/projects/ui/scene-parts";
+import { projectFramePosition } from "./project-framing";
 
 const TRANSPARENT_PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/9xkAAAAASUVORK5CYII=";
 
@@ -64,19 +67,47 @@ export function disposeLoadedScene(root: Object3D): void {
   for (const texture of textures) texture.dispose();
 }
 
-export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, frameVersion, onReady }: {
+export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, frameVersion, frameOnLoad = true, frameCamera, appearance, previewHiddenIds, onParts, onSelectPart, onInteract, onMissingParts, onReady }: {
   modelUrl: string;
   primaryRelativePath: string;
   files: ViewerFile[];
   autoPlay: boolean;
   frameVersion: number;
+  frameOnLoad?: boolean;
+  frameCamera?: ProjectSnapshot["scene"]["camera"];
+  appearance?: ProjectSnapshot["appearance"]["nodes"];
+  previewHiddenIds?: string[];
+  onParts?: (parts: PartSummary[]) => void;
+  onSelectPart?: (id: string) => void;
+  onInteract?: (id: string, trigger: "click" | "hover") => void;
+  onMissingParts?: (ids: string[]) => void;
   onReady: () => void;
 }) {
   const [gltf, setGltf] = useState<GLTF | null>(null);
   const [loadError, setLoadError] = useState<Error | null>(null);
   const mixer = useRef<AnimationMixer | null>(null);
   const bounds = useBounds();
-  const scene = useMemo(() => gltf ? cloneSkeleton(gltf.scene) : null, [gltf]);
+  const camera = useThree((state) => state.camera);
+  const sceneData = useMemo(() => {
+    if (!gltf) return null;
+    const scene = cloneSkeleton(gltf.scene);
+    scene.updateMatrixWorld(true);
+    const parts = indexSceneParts(scene);
+    const summaries = parts.map(summarizePart);
+    const applied = applyAppearance(scene, appearance ?? {});
+    for (const part of parts) if (previewHiddenIds?.includes(part.id)) part.object.visible = false;
+    return { scene, parts, summaries, applied };
+  }, [gltf, appearance, previewHiddenIds]);
+  const scene = sceneData?.scene;
+  const lastFrameVersion = useRef(-1);
+
+  useEffect(() => () => sceneData?.applied.dispose(), [sceneData]);
+
+  useEffect(() => {
+    if (!sceneData) return;
+    onParts?.(sceneData.summaries);
+    onMissingParts?.(sceneData.applied.missing);
+  }, [sceneData, onParts, onMissingParts]);
 
   useEffect(() => {
     let active = true;
@@ -98,9 +129,19 @@ export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, fra
 
   useEffect(() => {
     if (!scene) return;
-    bounds.refresh(scene).clip().fit();
+    if ((frameOnLoad && lastFrameVersion.current < 0) || (frameVersion > 0 && frameVersion !== lastFrameVersion.current)) {
+      bounds.refresh(scene);
+      if (frameCamera) {
+        const { center, distance } = bounds.getSize();
+        camera.position.copy(projectFramePosition(center, distance, frameCamera.position, frameCamera.target));
+        camera.lookAt(center);
+        camera.updateMatrixWorld();
+      }
+      bounds.clip().fit();
+    }
+    lastFrameVersion.current = frameVersion;
     onReady();
-  }, [scene, frameVersion, bounds, onReady]);
+  }, [scene, frameVersion, frameOnLoad, frameCamera, bounds, camera, onReady]);
 
   useEffect(() => {
     if (!scene || !gltf?.animations.length || !autoPlay) return;
@@ -120,5 +161,9 @@ export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, fra
   if (!scene) return null;
   // SkeletonUtils clones the hierarchy and bones but shares geometry/materials
   // with this preview's loader. The loader effect disposes them on unmount.
-  return <primitive object={scene} />;
+  const partFor = (object: Object3D) => sceneData?.parts.find((item) => item.object === object);
+  return <primitive object={scene} onClick={onSelectPart || onInteract ? (event: { object: Object3D; stopPropagation: () => void }) => {
+    const part = partFor(event.object);
+    if (part) { event.stopPropagation(); if (onInteract) onInteract(part.id, "click"); else onSelectPart?.(part.id); }
+  } : undefined} onPointerOver={onInteract ? (event: { object: Object3D; stopPropagation: () => void }) => { const part = partFor(event.object); if (part) { event.stopPropagation(); onInteract(part.id, "hover"); } } : undefined} />;
 }

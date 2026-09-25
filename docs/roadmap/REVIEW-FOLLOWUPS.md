@@ -27,11 +27,11 @@ This file turns the coordinator and subagent review findings into executable tas
 
 ## Phase 3 — visual authoring
 
-- [ ] Implement owner-scoped project records with save/reopen, typed configuration persistence, undo/redo, step navigation, and an unsaved-state retry path after Neon or network failure.
-- [ ] Implement stable part selection shared by hierarchy and viewport, validated appearance overrides, individual reset, and protection against duplicate or renamed nodes targeting the wrong object.
-- [ ] Implement serializable scene settings with range validation, responsive/reduced-motion previews, predictable camera reset, and large/small model frame selection.
-- [ ] Implement allowlisted interactions for click/hover, hotspots, annotations, and camera targets with missing-target warnings, safe preview mode, and rejection of executable script payloads.
-- [ ] Add browser coverage for project save, preview, undo/redo, reload, owner isolation, responsive/reduced-motion behavior, and full-suite regression.
+- [x] Implement owner-scoped project records with save/reopen, typed configuration persistence, undo/redo, step navigation, and an unsaved-state retry path after Neon or network failure.
+- [x] Implement stable part selection shared by hierarchy and viewport, validated appearance overrides, individual reset, and protection against duplicate or renamed nodes targeting the wrong object.
+- [x] Implement serializable scene settings with range validation, responsive/reduced-motion previews, predictable camera reset, and large/small model frame selection.
+- [x] Implement allowlisted interactions for click/hover, hotspots, annotations, and camera targets with missing-target warnings, safe preview mode, and rejection of executable script payloads.
+- [x] Add browser coverage for project save, preview, undo/redo, reload, owner isolation, responsive/reduced-motion behavior, and full-suite regression.
 
 ## Phase 4 — animation
 

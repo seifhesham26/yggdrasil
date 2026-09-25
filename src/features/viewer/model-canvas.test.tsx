@@ -2,16 +2,19 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ModelCanvas } from "./model-canvas";
+import { defaultProjectSnapshot } from "@/features/projects/domain/project-state";
+import { PerspectiveCamera } from "three";
 
 const state = vi.hoisted(() => ({ mode: "loading" as "loading" | "ready" | "error", autoPlay: true }));
 
 vi.mock("@react-three/fiber", () => ({
   Canvas: ({ children, camera, ...props }: { children: React.ReactNode; camera: unknown; "aria-label"?: string }) => <div data-testid="mock-canvas" data-camera={JSON.stringify(camera)} aria-label={props["aria-label"]}>{children}</div>,
+  useThree: () => ({ camera: new PerspectiveCamera(), gl: { toneMappingExposure: 1, setClearColor: () => {} } }),
 }));
 
 vi.mock("@react-three/drei", () => ({
   Bounds: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  OrbitControls: () => null,
+  OrbitControls: ({ minDistance }: { minDistance: number }) => <div data-testid="orbit-controls" data-min-distance={minDistance} />,
   Grid: () => null,
 }));
 
@@ -37,6 +40,11 @@ describe("ModelCanvas", () => {
     render(<ModelCanvas {...props} />);
     expect(screen.getByTestId("mock-canvas")).toHaveAttribute("aria-label", "3D model preview");
     expect(screen.getByTestId("mock-canvas").getAttribute("data-camera")).toMatch(/position/);
+  });
+
+  it("allows framing very small project models without the asset viewer's distance clamp", () => {
+    render(<ModelCanvas {...props} presentation={{ snapshot: defaultProjectSnapshot(), onParts: () => {}, onSelectPart: () => {}, onMissingParts: () => {} }} />);
+    expect(screen.getByTestId("orbit-controls")).toHaveAttribute("data-min-distance", "1e-9");
   });
 
   it("shows loading progress while the scene is unresolved", () => {

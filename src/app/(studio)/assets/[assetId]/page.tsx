@@ -6,6 +6,7 @@ import { DrizzleAssetRepository } from "@/features/assets/infrastructure/asset-r
 import { AnalysisSummary } from "@/features/assets/ui/analysis-summary";
 import { ModelCanvasLoader } from "@/features/viewer/model-canvas-loader";
 import { OptimizationControls } from "@/features/assets/ui/optimization-controls";
+import { AssetProjects } from "@/features/projects/ui/asset-projects";
 import { VariantControls } from "@/features/assets/ui/variant-controls";
 import { variantSourcePath } from "@/features/assets/application/variant-switch";
 import { LocalAssetStorage } from "@/lib/storage/local-storage";
@@ -47,6 +48,7 @@ export default async function AssetPage({ params }: { params: Promise<{ assetId:
         </aside>
       </div>
       <OptimizationControls assetId={asset.id} sourceFiles={asset.files.map((file) => ({ relativePath: file.relativePath, storageKey: file.storageKey }))} />
+      {asset.status === "ready" ? <AssetProjects assetId={asset.id} /> : null}
       {candidates.length ? <VariantControls assetId={asset.id} candidates={candidates} currentModelPath={currentModelPath} attributionFiles={attributionFiles.map((file) => ({ relativePath: file.relativePath, storageKey: file.storageKey }))} attribution={attribution} /> : null}
       <div className="asset-detail-lower">
         <section className="asset-info-section" aria-labelledby="source-heading"><div className="detail-section-title"><FileArchive size={20} aria-hidden="true" /><h2 id="source-heading">Source package</h2></div><dl><div><dt>Primary model</dt><dd>{currentModelPath ?? sourcePrimary?.relativePath ?? "Not available"}</dd></div><div><dt>Stored files</dt><dd>{asset.files.length}</dd></div><div><dt>Source size</dt><dd>{sourceSize}</dd></div><div><dt>Imported</dt><dd><time dateTime={asset.createdAt.toISOString()}>{new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(asset.createdAt)}</time></dd></div></dl><p className="detail-empty">No destructive changes applied. Your original source files remain unchanged.</p></section>
