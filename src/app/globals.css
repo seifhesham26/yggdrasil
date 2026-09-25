@@ -53,6 +53,9 @@ a { color: inherit; text-decoration: none; }
 .online-dot { width: 7px; height: 7px; border-radius: 50%; background: #78a994; box-shadow: 0 0 0 3px #dcebe3; }
 
 .library-page { width: min(100%, 1470px); margin: 0 auto; padding: 50px clamp(26px, 4.1vw, 70px) 100px; }
+.library-recovery { padding: 64px 0; }
+.library-recovery h1 { margin: 0; font-family: var(--serif); font-size: 44px; font-weight: 600; }
+.library-recovery p { margin: 12px 0 24px; color: var(--ink-muted); }
 .library-intro { display: flex; justify-content: space-between; align-items: end; gap: 24px; margin-bottom: 44px; }
 .library-intro h1 { margin: 0; font-family: var(--serif); font-size: clamp(62px, 7vw, 102px); font-weight: 550; letter-spacing: -.07em; line-height: .84; }
 .library-intro p:last-child { margin: 22px 0 0; color: var(--ink-muted); font-size: 13px; }

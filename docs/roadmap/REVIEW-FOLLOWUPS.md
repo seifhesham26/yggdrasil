@@ -1,6 +1,6 @@
 # Review follow-up task ledger
 
-Last checked: 2026-09-24
+Last checked: 2026-09-25
 
 This file turns the coordinator and subagent review findings into executable tasks. These tasks supplement the phase briefs; they do not replace their acceptance criteria. Keep every item unchecked until its implementation and evidence are complete.
 
@@ -51,3 +51,10 @@ This file turns the coordinator and subagent review findings into executable tas
 ## Cross-cutting design decision
 
 - [ ] Resolve the verified private fixture camera-count discrepancy between the roadmap (zero cameras) and the approved design text (one camera), then update the authoritative document and any fixtures before acceptance.
+
+## Runtime database diagnostics — reported 2026-09-25
+
+- [x] Library query failure: a read-only reproduction exposed PostgreSQL SQLSTATE `42703`, `column assets.current_version_id does not exist`. The configured database had applied only migrations 0000-0002, with no asset rows. Applied the pending additive migrations through 0007; the ledger now has eight entries, the column exists, and the exact `listAssets` call completes. The existing PGlite optimization wiring test exercises `listAssets` after applying all migrations. A library error boundary now offers retry without displaying raw SQL.
+- [x] PostgreSQL SSL warning: runtime and Drizzle migration URLs now normalize legacy `prefer`, `require`, and `verify-ca` modes to `sslmode=verify-full`, preserving the current driver behavior; explicit libpq compatibility remains unchanged. Unit tests cover both cases. The real migration and repository-query runs completed without the warning, and `.env.example` now uses `verify-full`.
+
+Verification: `pnpm test` passed 40 files with 213 tests passed and one pre-existing optional skip; `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `git diff --check` passed. After restarting the local Next.js dev process, `/library` returned HTTP 200 on port 3000 with no SSL warning in the server error log.
