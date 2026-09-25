@@ -95,7 +95,8 @@ export async function analyzeGltf(storage: AssetStorage, primaryKey: StorageKey)
   const meshes = root.listMeshes();
   const primitives = meshes.flatMap((mesh) => mesh.listPrimitives());
   const nodes = root.listNodes();
-  const animations = root.listAnimations().map((animation) => {
+  const joints = new Set(root.listSkins().flatMap((skin) => skin.listJoints()));
+  const animations = root.listAnimations().map((animation, sourceIndex) => {
     const name = animation.getName();
     if (!name) warnings.push({ code: "UNNAMED_ANIMATION", severity: "info", message: "An animation clip has no name." });
     let durationSeconds = 0;
@@ -107,8 +108,12 @@ export async function analyzeGltf(storage: AssetStorage, primaryKey: StorageKey)
         if (Number.isFinite(start) && Number.isFinite(end)) durationSeconds = Math.max(durationSeconds, end - start);
       }
     }
-    return { name, durationSeconds, channels: animation.listChannels().length };
-  }).sort((a, b) => a.name.localeCompare(b.name));
+    const channels = animation.listChannels();
+    const targets = channels.map((channel) => ({ nodeName: channel.getTargetNode()?.getName() || "(unnamed)", path: channel.getTargetPath() ?? "unknown" }));
+    return { name, durationSeconds, channels: channels.length, sourceIndex, targets,
+      usesSkeleton: channels.some((channel) => joints.has(channel.getTargetNode()!)),
+      usesMorph: targets.some((target) => target.path === "weights") };
+  });
   for (const mesh of meshes) {
     if (!mesh.getName()) warnings.push({ code: "UNNAMED_MESH", severity: "info", message: "A mesh has no name." });
   }

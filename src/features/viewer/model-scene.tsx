@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useBounds } from "@react-three/drei";
-import { AnimationMixer, BufferGeometry, LoadingManager, Material, type Object3D, Texture } from "three";
+import { AnimationMixer, BufferGeometry, LoadingManager, Material, type AnimationAction, type Object3D, Texture } from "three";
 import { GLTFLoader, type GLTF } from "three/addons/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 import { clone as cloneSkeleton } from "three/addons/utils/SkeletonUtils.js";
@@ -11,6 +11,7 @@ import type { ViewerFile } from "./model-canvas";
 import type { ProjectSnapshot } from "@/features/projects/domain/project-state";
 import { applyAppearance, indexSceneParts, summarizePart, type PartSummary } from "@/features/projects/ui/scene-parts";
 import { projectFramePosition } from "./project-framing";
+import { advanceClip, clipTime, inspectClips, playableClip, type AnimationPreview, type ClipSource } from "./animation-clips";
 
 const TRANSPARENT_PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/9xkAAAAASUVORK5CYII=";
 
@@ -67,7 +68,7 @@ export function disposeLoadedScene(root: Object3D): void {
   for (const texture of textures) texture.dispose();
 }
 
-export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, frameVersion, frameOnLoad = true, frameCamera, appearance, previewHiddenIds, onParts, onSelectPart, onInteract, onMissingParts, onReady }: {
+export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, frameVersion, frameOnLoad = true, frameCamera, appearance, previewHiddenIds, animationPreview, onClips, onAnimationProgress, onParts, onSelectPart, onInteract, onMissingParts, onReady }: {
   modelUrl: string;
   primaryRelativePath: string;
   files: ViewerFile[];
@@ -77,6 +78,9 @@ export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, fra
   frameCamera?: ProjectSnapshot["scene"]["camera"];
   appearance?: ProjectSnapshot["appearance"]["nodes"];
   previewHiddenIds?: string[];
+  animationPreview?: AnimationPreview;
+  onClips?: (clips: ClipSource[]) => void;
+  onAnimationProgress?: (progress: number, finished: boolean) => void;
   onParts?: (parts: PartSummary[]) => void;
   onSelectPart?: (id: string) => void;
   onInteract?: (id: string, trigger: "click" | "hover") => void;
@@ -86,6 +90,7 @@ export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, fra
   const [gltf, setGltf] = useState<GLTF | null>(null);
   const [loadError, setLoadError] = useState<Error | null>(null);
   const mixer = useRef<AnimationMixer | null>(null);
+  const playback = useRef<{ mixer: AnimationMixer; action: AnimationAction; time: number; direction: 1 | -1; lastReport: number } | null>(null);
   const bounds = useBounds();
   const camera = useThree((state) => state.camera);
   const sceneData = useMemo(() => {
@@ -99,6 +104,7 @@ export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, fra
     return { scene, parts, summaries, applied };
   }, [gltf, appearance, previewHiddenIds]);
   const scene = sceneData?.scene;
+  const sources = useMemo(() => gltf && scene ? inspectClips(gltf.animations, scene) : [], [gltf, scene]);
   const lastFrameVersion = useRef(-1);
 
   useEffect(() => () => sceneData?.applied.dispose(), [sceneData]);
@@ -108,6 +114,8 @@ export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, fra
     onParts?.(sceneData.summaries);
     onMissingParts?.(sceneData.applied.missing);
   }, [sceneData, onParts, onMissingParts]);
+
+  useEffect(() => { if (gltf && scene) onClips?.(sources); }, [gltf, scene, sources, onClips]);
 
   useEffect(() => {
     let active = true;
@@ -143,19 +151,50 @@ export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, fra
     onReady();
   }, [scene, frameVersion, frameOnLoad, frameCamera, bounds, camera, onReady]);
 
+  const selected = animationPreview?.clip;
+  const hasAnimationPreview = animationPreview !== undefined;
   useEffect(() => {
-    if (!scene || !gltf?.animations.length || !autoPlay) return;
+    if (!scene || !gltf?.animations.length) return;
+    const source = selected ? gltf.animations[selected.sourceIndex] : !hasAnimationPreview && autoPlay ? gltf.animations[0] : null;
+    if (!source || (selected && !selected.enabled)) return;
     const current = new AnimationMixer(scene);
-    current.clipAction(gltf.animations[0]).play();
+    if (selected) {
+      const safeClip = playableClip(source, sources[selected.sourceIndex]?.missingTargets ?? []);
+      const action = current.clipAction(safeClip).play();
+      const time = clipTime(selected, 0);
+      action.time = time;
+      current.update(0);
+      playback.current = { mixer: current, action, time, direction: 1, lastReport: 0 };
+    } else current.clipAction(source).play();
     mixer.current = current;
     return () => {
-      current.stopAllAction();
-      current.uncacheRoot(scene);
-      mixer.current = null;
+      current.stopAllAction(); current.uncacheRoot(scene);
+      if (mixer.current === current) mixer.current = null;
+      if (playback.current?.mixer === current) playback.current = null;
     };
-  }, [scene, gltf, autoPlay]);
+  }, [scene, gltf, selected, animationPreview?.restartToken, sources, autoPlay, hasAnimationPreview]);
 
-  useFrame((_, delta) => mixer.current?.update(delta));
+  useEffect(() => {
+    if (!selected || !playback.current || animationPreview?.playing) return;
+    const state = playback.current;
+    state.time = clipTime(selected, animationPreview?.progress ?? 0);
+    state.direction = 1;
+    state.action.time = state.time; state.mixer.update(0);
+  }, [animationPreview?.progress, animationPreview?.playing, selected, gltf]);
+
+  useFrame((_, delta) => {
+    const state = playback.current;
+    if (!state || !selected) { mixer.current?.update(delta); return; }
+    if (!animationPreview?.playing) return;
+    const next = advanceClip(selected, state.time, Math.min(delta, 0.1), state.direction);
+    state.time = next.time; state.direction = next.direction;
+    state.action.time = next.time; state.mixer.update(0);
+    const now = performance.now();
+    if (next.finished || now - state.lastReport > 100) {
+      state.lastReport = now;
+      onAnimationProgress?.((next.time - selected.trimStart) / (selected.trimEnd - selected.trimStart), next.finished);
+    }
+  });
 
   if (loadError) throw loadError;
   if (!scene) return null;

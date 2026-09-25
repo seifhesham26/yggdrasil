@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { NodeIO } from "@gltf-transform/core";
 import { LocalAssetStorage } from "@/lib/storage/local-storage";
 import { parseStorageKey } from "@/lib/storage/storage-key";
-import { createGltfFixture } from "@/test/fixtures/create-gltf-fixture";
+import { createGltfFixture, createMultiClipGltfFixture } from "@/test/fixtures/create-gltf-fixture";
 import { analyzeGltf } from "./gltf-analyzer";
 
 const tempRoots: string[] = [];
@@ -36,7 +36,21 @@ describe("analyzeGltf", () => {
     });
     expect(analysis.nodeNames).toEqual(["Animated Triangle"]);
     expect(analysis.bounds).toEqual({ min: [0, 0, 0], max: [1, 1, 0] });
-    expect(analysis.animations).toEqual([{ name: "Rise", durationSeconds: 1, channels: 1 }]);
+    expect(analysis.animations).toEqual([{ name: "Rise", durationSeconds: 1, channels: 1, sourceIndex: 0, targets: [{ nodeName: "Animated Triangle", path: "translation" }], usesSkeleton: false, usesMorph: false }]);
+  });
+
+  it("keeps multiple clip source indices, durations and targets in glTF order", async () => {
+    const root = await mkdtemp(join(tmpdir(), "yggdrasil-multi-clip-")); tempRoots.push(root);
+    const storage = new LocalAssetStorage(root);
+    const fixture = createMultiClipGltfFixture();
+    const key = parseStorageKey(fixture.model.relativePath);
+    await storage.put(key, fixture.model.bytes);
+    await storage.put(parseStorageKey(fixture.binary.relativePath), fixture.binary.bytes);
+    const analysis = await analyzeGltf(storage, key);
+    expect(analysis.animations).toMatchObject([
+      { name: "Z Rise", sourceIndex: 0, durationSeconds: 1, targets: [{ nodeName: "Animated Triangle", path: "translation" }] },
+      { name: "A Scale", sourceIndex: 1, durationSeconds: 2, targets: [{ nodeName: "Animated Triangle", path: "scale" }] },
+    ]);
   });
 
   it("also analyzes a GLB produced from the generated fixture", async () => {

@@ -9,7 +9,7 @@ Status key: `[ ]` not yet accepted, `[x]` complete. Phase 2 has implementation a
 | [1 — Broader imports](phase-1-imports/README.md) | FBX/OBJ, large packages, variants, attribution, jobs | 4 | Accepted |
 | [2 — Reversible optimization](phase-2-optimization/README.md) | Recommendations, versions, comparison, history | 4 | Accepted |
 | [3 — Visual authoring](phase-3-authoring/README.md) | Appearance, scene, interactions, saved project state | 4 | Accepted |
-| [4 — Animation studio](phase-4-animation/README.md) | Embedded/imported clips, mapping, blending, GSAP | 4 | Planned |
+| [4 — Animation studio](phase-4-animation/README.md) | Embedded/imported clips, mapping, blending, GSAP | 4 | In progress (4.1 accepted) |
 | [5 — Export](phase-5-export/README.md) | React, embed, package, prefetch policies | 4 | Planned |
 
 The [approved design](../superpowers/specs/2026-09-22-yggdrasil-design.md) defines product behavior. These are scoped task briefs, not implementation-ready API contracts. Before executing a phase, inspect the then-current code and dependency documentation, resolve open design choices, and write a detailed implementation plan with tests. Do not treat suggested file areas as promised paths.

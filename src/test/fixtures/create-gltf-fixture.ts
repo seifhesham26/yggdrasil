@@ -42,3 +42,20 @@ export function createGltfFixture(): { model: ImportFile; binary: ImportFile } {
     binary: { relativePath: "triangle.bin", bytes: binary },
   };
 }
+
+/** Two clips in deliberately nonalphabetic source order and with distinct durations and targets. */
+export function createMultiClipGltfFixture(): { model: ImportFile; binary: ImportFile } {
+  const fixture = createGltfFixture();
+  const binary = new Uint8Array(76);
+  binary.set(fixture.binary.bytes);
+  const view = new DataView(binary.buffer);
+  view.setFloat32(68, 0, true);
+  view.setFloat32(72, 2, true);
+  const document = JSON.parse(new TextDecoder().decode(fixture.model.bytes));
+  document.buffers[0].byteLength = binary.byteLength;
+  document.bufferViews.push({ buffer: 0, byteOffset: 68, byteLength: 8 });
+  document.accessors.push({ bufferView: 3, componentType: 5126, count: 2, type: "SCALAR", min: [0], max: [2] });
+  document.animations[0].name = "Z Rise";
+  document.animations.push({ name: "A Scale", samplers: [{ input: 3, output: 2, interpolation: "LINEAR" }], channels: [{ sampler: 0, target: { node: 0, path: "scale" } }] });
+  return { model: { ...fixture.model, bytes: new TextEncoder().encode(JSON.stringify(document)) }, binary: { ...fixture.binary, bytes: binary } };
+}

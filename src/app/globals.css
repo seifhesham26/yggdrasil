@@ -356,6 +356,20 @@ a { color: inherit; text-decoration: none; }
 .interaction-controls ul { margin: 0; padding: 0; list-style: none; }
 .interaction-controls li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 12px 0; border-top: 1px solid #36515a; }
 .interaction-controls li small { display: block; color: #9bb8b4; overflow-wrap: anywhere; }
+.animation-controls { display: flex; flex-direction: column; gap: 14px; }
+.animation-controls h3 { margin: 10px 0 0; font-size: 15px; }
+.animation-controls ul { margin: 0; padding: 0; list-style: none; }
+.animation-controls li { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 0; border-top: 1px solid #36515a; }
+.animation-controls li span { flex: 1; min-width: 120px; color: #a6bfba; font-size: 12px; }
+.animation-controls button { padding: 8px 10px; border: 1px solid #6a918d; background: #244b50; color: #eaf3f0; cursor: pointer; }
+.animation-controls button[aria-pressed="true"] { border-color: #e6c587; background: #45605c; }
+.animation-controls button:disabled { opacity: .5; }
+.animation-selected { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid #46666d; }
+.animation-selected label { display: flex; flex-direction: column; align-items: stretch; }
+.animation-selected label:has(input[type="checkbox"]) { flex-direction: row; justify-content: start; }
+.animation-transport { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.animation-transport label { flex: 1; min-width: 130px; }
+.animation-transport input[type="range"] { width: 100%; }
 .interaction-warnings { padding: 8px 12px; border: 1px solid #b18858; background: #3c3327; }
 .viewer-interactions { position: absolute; z-index: 3; left: 12px; bottom: 14px; display: flex; flex-wrap: wrap; gap: 8px; max-width: calc(100% - 24px); }
 .viewer-interactions button { padding: 8px 10px; border: 1px solid #a9d8d0; border-radius: 4px; background: #16353bdc; color: #f5fffc; cursor: pointer; }

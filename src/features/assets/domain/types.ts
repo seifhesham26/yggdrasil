@@ -32,7 +32,7 @@ export type AssetAnalysis = {
     animations: number;
   };
   bounds: { min: [number, number, number]; max: [number, number, number] } | null;
-  animations: Array<{ name: string; durationSeconds: number; channels: number }>;
+  animations: Array<{ name: string; durationSeconds: number; channels: number; sourceIndex?: number; targets?: Array<{ nodeName: string; path: string }>; usesSkeleton?: boolean; usesMorph?: boolean }>;
   nodeNames: string[];
   extensionsUsed: string[];
   warnings: Array<{ code: string; severity: "info" | "warning" | "error"; message: string }>;

@@ -58,7 +58,7 @@
 
 ## Phase 4: Animation
 
-- [ ] Ship embedded clip inventory and project-only clip edits with deterministic playback and persistence.
+- [x] Ship embedded clip inventory and project-only clip edits with deterministic playback and persistence.
 - [ ] Ship compatible imported clips with explicit mapping and rollback tests.
 - [ ] Ship sequence/blend semantics and timeline editing with trigger, reduced-motion, and teardown coverage.
 

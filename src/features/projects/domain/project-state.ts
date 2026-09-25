@@ -25,15 +25,21 @@ const Interaction = z.object({
     z.object({ type: z.literal("show-annotation"), annotation: z.string().min(1).max(2000) }).strict(),
   ]),
 }).strict();
+const EmbeddedClip = z.object({
+  id: z.string().uuid(), sourceIndex: z.number().int().min(0), name: z.string().min(1).max(120),
+  enabled: z.boolean(), trimStart: z.number().min(0).finite(), trimEnd: z.number().positive().finite(),
+  speed: z.number().min(0.05).max(8).finite(), loop: z.enum(["once", "repeat", "pingpong"]),
+}).strict().refine((clip) => clip.trimEnd > clip.trimStart, "Trim end must follow trim start.");
+
 export const ProjectSnapshotSchema = z.object({
   schemaVersion: z.literal(1), appearance: z.object({ nodes: z.record(z.string(), AppearanceOverride) }).strict(), scene: SceneSettings,
-  interactions: z.array(Interaction).max(200), animation: z.object({ clips: z.array(z.record(z.string(), z.unknown())).max(200), timelines: z.array(z.record(z.string(), z.unknown())).max(50) }).strict(),
+  interactions: z.array(Interaction).max(200), animation: z.object({ embeddedClips: z.array(EmbeddedClip).max(200), clips: z.array(z.record(z.string(), z.unknown())).max(200), timelines: z.array(z.record(z.string(), z.unknown())).max(50) }).strict(),
   export: z.object({ loadingPolicy: z.enum(["on-demand", "metadata-first", "critical-assets", "full-preload"]), criticalAssetIds: z.array(z.string()).max(500) }).strict(),
 }).strict();
 export type ProjectSnapshot = z.infer<typeof ProjectSnapshotSchema>;
 
 export function defaultProjectSnapshot(): ProjectSnapshot {
-  return { schemaVersion: 1, appearance: { nodes: {} }, scene: { background: "#111417", environment: "studio", exposure: 0, camera: { position: [3, 2, 5], target: [0, 0, 0], fov: 45 }, shadows: true, controls: "orbit", reducedMotion: false }, interactions: [], animation: { clips: [], timelines: [] }, export: { loadingPolicy: "metadata-first", criticalAssetIds: [] } };
+  return { schemaVersion: 1, appearance: { nodes: {} }, scene: { background: "#111417", environment: "studio", exposure: 0, camera: { position: [3, 2, 5], target: [0, 0, 0], fov: 45 }, shadows: true, controls: "orbit", reducedMotion: false }, interactions: [], animation: { embeddedClips: [], clips: [], timelines: [] }, export: { loadingPolicy: "metadata-first", criticalAssetIds: [] } };
 }
 
 function migrateLegacy(input: unknown): unknown {

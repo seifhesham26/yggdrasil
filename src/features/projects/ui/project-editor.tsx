@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ModelCanvasLoader } from "@/features/viewer/model-canvas-loader";
 import type { ViewerFile } from "@/features/viewer/model-canvas";
@@ -10,6 +10,8 @@ import { AppearanceControls } from "./appearance-controls";
 import type { PartSummary } from "./scene-parts";
 import { SceneControls, type PreviewSize } from "./scene-controls";
 import { InteractionControls } from "./interaction-controls";
+import { AnimationControls } from "./animation-controls";
+import { sourceClipEdit, type ClipSource } from "@/features/viewer/animation-clips";
 
 type Model = { modelUrl: string; primaryRelativePath: string; files: ViewerFile[] };
 type SaveStatus = "saved" | "unsaved" | "saving" | "error";
@@ -29,6 +31,14 @@ export function ProjectEditor({ initialState, assetName, model }: { initialState
   const [missingParts, setMissingParts] = useState<string[]>([]);
   const [previewSize, setPreviewSize] = useState<PreviewSize>("desktop");
   const [previewingInteractions, setPreviewingInteractions] = useState(false);
+  const [clipSources, setClipSources] = useState<ClipSource[]>([]);
+  const [selectedClipKey, setSelectedClipKey] = useState<string | null>(null);
+  const [clipProgress, setClipProgress] = useState(0);
+  const [clipPlaying, setClipPlaying] = useState(false);
+  const [clipRestartToken, setClipRestartToken] = useState(0);
+  const onClips = useCallback((clips: ClipSource[]) => setClipSources(clips), []);
+  const onAnimationProgress = useCallback((progress: number, finished: boolean) => { setClipProgress(progress); if (finished) setClipPlaying(false); }, []);
+  const selectClip = useCallback((key: string) => { setSelectedClipKey(key); setClipProgress(0); setClipPlaying(false); setClipRestartToken((value) => value + 1); }, []);
   const onParts = useCallback((next: PartSummary[]) => { setParts(next); setSelectedId((current) => current ?? next[0]?.id ?? null); }, []);
   const onMissingParts = useCallback((ids: string[]) => setMissingParts(ids), []);
   const selectFromViewport = useCallback((id: string) => { setSelectedId(id); setSelectionOrigin("viewport"); }, []);
@@ -146,6 +156,10 @@ export function ProjectEditor({ initialState, assetName, model }: { initialState
 
   const canUndo = undoStack.length > 0 || (!dirty && Boolean(serverState.project.currentRevisionId));
   const canRedo = redoStack.length > 0 || (!dirty && serverState.revisions.some((revision) => revision.parentRevisionId === serverState.project.currentRevisionId));
+  const selectedCopy = snapshot.animation.embeddedClips.find((clip) => clip.id === selectedClipKey);
+  const sourceIndex = selectedCopy?.sourceIndex ?? (selectedClipKey?.startsWith("source-") ? Number(selectedClipKey.slice(7)) : -1);
+  const selectedSource = clipSources[sourceIndex];
+  const previewClip = useMemo(() => selectedCopy ?? (selectedSource ? { ...sourceClipEdit(selectedSource), id: `source-${sourceIndex}` } : null), [selectedCopy, selectedSource, sourceIndex]);
   return <main className="project-editor">
     <div className="project-editor-header">
       <div><Link href={`/assets/${serverState.project.assetId}`}>← {assetName}</Link><p className="section-kicker">Project editor</p><h1>{serverState.project.name}</h1></div>
@@ -154,11 +168,11 @@ export function ProjectEditor({ initialState, assetName, model }: { initialState
     {message ? <div role="alert" className="project-save-error"><span>{message}</span><button type="button" onClick={() => void save(pendingStep ?? activeStep)}>Retry save</button></div> : null}
     <nav className="project-step-nav" aria-label="Project steps"><ol>{projectStepNames.map((step, index) => { const record = serverState.steps.find((item) => item.name === step); return <li key={step}><button type="button" aria-label={`${step} step`} aria-current={activeStep === step ? "step" : undefined} onClick={() => void navigate(step)} disabled={busy}><span>{String(index + 1).padStart(2, "0")}</span><strong>{step}</strong><small>{activeStep === step && (dirty || status === "error") ? "Unsaved" : record?.status ?? "not-started"}</small></button></li>; })}</ol></nav>
     <div className="project-editor-grid">
-      <section className="project-editor-preview" aria-label="Project preview" data-preview-size={previewSize}><ModelCanvasLoader key={previewingInteractions && activeStep === "Interactions" ? "preview" : "edit"} {...model} presentation={{ snapshot, onParts, onSelectPart: selectFromViewport, onMissingParts, previewInteractions: previewingInteractions && activeStep === "Interactions" }} /></section>
+      <section className="project-editor-preview" aria-label="Project preview" data-preview-size={previewSize}><ModelCanvasLoader key={previewingInteractions && activeStep === "Interactions" ? "preview" : "edit"} {...model} presentation={{ snapshot, onParts, onSelectPart: selectFromViewport, onMissingParts, previewInteractions: previewingInteractions && activeStep === "Interactions", onClips, onAnimationProgress, animationPreview: activeStep === "Animate" ? { clip: previewClip, playing: clipPlaying, progress: clipProgress, restartToken: clipRestartToken } : undefined }} /></section>
       <section className="project-editor-panel" aria-label={`${activeStep} controls`}>
         <p className="section-kicker">Step {projectStepNames.indexOf(activeStep) + 1} of 8</p><h2>{activeStep}</h2>
         <fieldset disabled={busy}>
-          {activeStep === "Appearance" ? <AppearanceControls snapshot={snapshot} parts={parts} selectedId={selectedId} selectionOrigin={selectionOrigin} onSelect={selectFromHierarchy} onChange={edit} missing={missingParts} /> : activeStep === "Scene" ? <SceneControls key={snapshot.scene.camera.fov} snapshot={snapshot} onChange={edit} previewSize={previewSize} onPreviewSize={setPreviewSize} /> : activeStep === "Interactions" ? <InteractionControls snapshot={snapshot} parts={parts} previewing={previewingInteractions} onPreview={setPreviewingInteractions} onChange={edit} /> : <p>This step is available for navigation. Its editing controls follow in the roadmap.</p>}
+          {activeStep === "Appearance" ? <AppearanceControls snapshot={snapshot} parts={parts} selectedId={selectedId} selectionOrigin={selectionOrigin} onSelect={selectFromHierarchy} onChange={edit} missing={missingParts} /> : activeStep === "Scene" ? <SceneControls key={snapshot.scene.camera.fov} snapshot={snapshot} onChange={edit} previewSize={previewSize} onPreviewSize={setPreviewSize} /> : activeStep === "Interactions" ? <InteractionControls snapshot={snapshot} parts={parts} previewing={previewingInteractions} onPreview={setPreviewingInteractions} onChange={edit} /> : activeStep === "Animate" ? <AnimationControls snapshot={snapshot} sources={clipSources} selectedKey={selectedClipKey} progress={clipProgress} playing={clipPlaying} onSelect={selectClip} onProgress={(progress) => { setClipProgress(progress); setClipPlaying(false); }} onPlaying={setClipPlaying} onRestart={() => { setClipProgress(0); setClipRestartToken((value) => value + 1); }} onChange={edit} /> : <p>This step is available for navigation. Its editing controls follow in the roadmap.</p>}
         </fieldset>
       </section>
     </div>

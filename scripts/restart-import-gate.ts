@@ -339,6 +339,46 @@ try {
   await page.waitForFunction(() => !document.body.textContent?.includes("Interaction missing-target targets a missing part"));
   console.log("INTERACTION_RELOAD_GATE_PASS: hotspot annotations and camera target work after reload; missing target warns; unsafe payload is rejected; undo clears warning.");
 
+  await page.getByRole("button", { name: "Animate step" }).click();
+  await page.getByRole("list", { name: "Source clips" }).getByText("Rise").waitFor();
+  await page.getByRole("button", { name: "Add project copy" }).click();
+  await page.getByLabel("Clip name").fill("Edited Rise");
+  await page.getByLabel("Trim start (s)").fill("0.2");
+  await page.getByLabel("Trim end (s)").fill("0.8");
+  await page.getByLabel("Speed").fill("1.5");
+  await page.getByLabel("Loop").selectOption("pingpong");
+  await page.getByRole("button", { name: "Grid" }).click();
+  await page.getByLabel("Scrub clip").fill("0");
+  await page.waitForTimeout(200);
+  const clipStartImage = await page.getByRole("region", { name: "Project preview" }).locator(".viewer-stage").screenshot();
+  await page.getByLabel("Scrub clip").fill("1");
+  await page.waitForTimeout(200);
+  const clipEndImage = await page.getByRole("region", { name: "Project preview" }).locator(".viewer-stage").screenshot();
+  const clipVisualDifference = await meanPixelDifference(clipStartImage, clipEndImage);
+  if (clipVisualDifference < 0.5) throw new Error(`Scrubbing did not visibly change the model pose (mean channel difference ${clipVisualDifference.toFixed(2)}).`);
+  await page.getByRole("button", { name: "Play", exact: true }).click();
+  await page.waitForTimeout(350);
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await page.getByLabel("Scrub clip").fill("0.5");
+  await page.getByRole("button", { name: "Restart", exact: true }).click();
+  await page.getByRole("button", { name: "Duplicate" }).click();
+  await page.getByRole("button", { name: "Remove Edited Rise copy" }).click();
+  await page.getByRole("list", { name: "Project clips" }).getByRole("button", { name: "Edited Rise", exact: true }).click();
+  await page.getByRole("checkbox", { name: "Enabled" }).uncheck();
+  await page.getByRole("button", { name: "Save project" }).click();
+  await page.locator(".save-state").getByText("Saved").waitFor();
+  await page.reload();
+  await page.getByRole("button", { name: "Animate step" }).waitFor();
+  if (await page.getByRole("button", { name: "Animate step" }).getAttribute("aria-current") !== "step") throw new Error("Animation step was not persisted.");
+  await page.getByRole("list", { name: "Project clips" }).getByText("Edited Rise").waitFor();
+  await page.getByRole("list", { name: "Source clips" }).getByText("Rise").waitFor();
+  const animationState = await (await page.request.get(`/api/projects/${projectId}`)).json() as { project: { snapshot: { animation: { embeddedClips: Array<Record<string, unknown>> } } } };
+  const [savedClip] = animationState.project.snapshot.animation.embeddedClips;
+  if (animationState.project.snapshot.animation.embeddedClips.length !== 1 || savedClip.name !== "Edited Rise" || savedClip.trimStart !== 0.2 || savedClip.trimEnd !== 0.8 || savedClip.speed !== 1.5 || savedClip.loop !== "pingpong" || savedClip.enabled !== false) throw new Error("Project clip settings did not survive reload.");
+  const storedAfterAnimation = await (await page.request.get(fileUrl)).body();
+  if (createHash("sha256").update(storedAfterAnimation).digest("hex") !== sourceHash) throw new Error("Animation edits changed original model bytes.");
+  console.log(`EMBEDDED_CLIP_RELOAD_GATE_PASS: source and project copies, preview transport (scrub screenshot difference ${clipVisualDifference.toFixed(2)}), duplicate/remove, trim/speed/loop/disable, saved reload, unchanged source hash.`);
+
   await page.emulateMedia({ reducedMotion: "reduce" });
   for (const [name, scale] of [["tiny", 0.00001], ["large", 100000]] as const) {
     await page.goto("/library");

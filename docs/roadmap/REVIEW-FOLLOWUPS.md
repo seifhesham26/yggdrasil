@@ -35,7 +35,7 @@ This file turns the coordinator and subagent review findings into executable tas
 
 ## Phase 4 — animation
 
-- [ ] Complete embedded clip inventory and project-only editing for rename, duplicate, trim, retime, loop, disable, remove, playback, reload, missing-target warnings, and source-hash preservation.
+- [x] Complete embedded clip inventory and project-only editing for rename, duplicate, trim, retime, loop, disable, remove, playback, reload, missing-target warnings, and source-hash preservation.
 - [ ] Implement imported clip validation, explicit bone/track mapping, ambiguity resolution, failure rollback, and reproducible reload behavior.
 - [ ] Implement serialized sequencing and blending for sequential clips, overlap/crossfade, loop boundaries, disabled clips, scrubbing, replay, incompatible-track warnings, and immutable source data.
 - [ ] Implement the typed GSAP timeline format, target/property validation, supported triggers, reduced-motion behavior, teardown/reopen cleanup, and preview/export parity without arbitrary JavaScript.
