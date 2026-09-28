@@ -12,6 +12,7 @@ import type { ProjectSnapshot } from "@/features/projects/domain/project-state";
 import { applyAppearance, indexSceneParts, summarizePart, type PartSummary } from "@/features/projects/ui/scene-parts";
 import { projectFramePosition } from "./project-framing";
 import { advanceClip, clipTime, inspectClips, playableClip, type AnimationPreview, type ClipSource } from "./animation-clips";
+import { importedClipAnimation } from "./imported-clips";
 
 const TRANSPARENT_PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/9xkAAAAASUVORK5CYII=";
 
@@ -115,6 +116,7 @@ export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, fra
     onMissingParts?.(sceneData.applied.missing);
   }, [sceneData, onParts, onMissingParts]);
 
+
   useEffect(() => { if (gltf && scene) onClips?.(sources); }, [gltf, scene, sources, onClips]);
 
   useEffect(() => {
@@ -152,16 +154,19 @@ export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, fra
   }, [scene, frameVersion, frameOnLoad, frameCamera, bounds, camera, onReady]);
 
   const selected = animationPreview?.clip;
+  const imported = animationPreview?.importedClip ?? null;
+  const selectedEdit = selected ?? imported;
   const hasAnimationPreview = animationPreview !== undefined;
   useEffect(() => {
-    if (!scene || !gltf?.animations.length) return;
-    const source = selected ? gltf.animations[selected.sourceIndex] : !hasAnimationPreview && autoPlay ? gltf.animations[0] : null;
-    if (!source || (selected && !selected.enabled)) return;
+    if (!scene || (!gltf?.animations.length && !imported)) return;
+    const animations = gltf?.animations ?? [];
+    const source = imported ? importedClipAnimation(imported) : selected ? animations[selected.sourceIndex] : !hasAnimationPreview && autoPlay ? animations[0] : null;
+    if (!source || (selectedEdit && !selectedEdit.enabled)) return;
     const current = new AnimationMixer(scene);
-    if (selected) {
-      const safeClip = playableClip(source, sources[selected.sourceIndex]?.missingTargets ?? []);
+    if (selectedEdit) {
+      const safeClip = imported ? source : playableClip(source, sources[selected!.sourceIndex]?.missingTargets ?? []);
       const action = current.clipAction(safeClip).play();
-      const time = clipTime(selected, 0);
+      const time = clipTime(selectedEdit, 0);
       action.time = time;
       current.update(0);
       playback.current = { mixer: current, action, time, direction: 1, lastReport: 0 };
@@ -172,27 +177,27 @@ export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, fra
       if (mixer.current === current) mixer.current = null;
       if (playback.current?.mixer === current) playback.current = null;
     };
-  }, [scene, gltf, selected, animationPreview?.restartToken, sources, autoPlay, hasAnimationPreview]);
+  }, [scene, gltf, selected, imported, selectedEdit, animationPreview?.restartToken, sources, autoPlay, hasAnimationPreview]);
 
   useEffect(() => {
-    if (!selected || !playback.current || animationPreview?.playing) return;
+    if (!selectedEdit || !playback.current || animationPreview?.playing) return;
     const state = playback.current;
-    state.time = clipTime(selected, animationPreview?.progress ?? 0);
+    state.time = clipTime(selectedEdit, animationPreview?.progress ?? 0);
     state.direction = 1;
     state.action.time = state.time; state.mixer.update(0);
-  }, [animationPreview?.progress, animationPreview?.playing, selected, gltf]);
+  }, [animationPreview?.progress, animationPreview?.playing, selectedEdit, gltf]);
 
   useFrame((_, delta) => {
     const state = playback.current;
-    if (!state || !selected) { mixer.current?.update(delta); return; }
+    if (!state || !selectedEdit) { mixer.current?.update(delta); return; }
     if (!animationPreview?.playing) return;
-    const next = advanceClip(selected, state.time, Math.min(delta, 0.1), state.direction);
+    const next = advanceClip(selectedEdit, state.time, Math.min(delta, 0.1), state.direction);
     state.time = next.time; state.direction = next.direction;
     state.action.time = next.time; state.mixer.update(0);
     const now = performance.now();
     if (next.finished || now - state.lastReport > 100) {
       state.lastReport = now;
-      onAnimationProgress?.((next.time - selected.trimStart) / (selected.trimEnd - selected.trimStart), next.finished);
+      onAnimationProgress?.((next.time - selectedEdit.trimStart) / (selectedEdit.trimEnd - selectedEdit.trimStart), next.finished);
     }
   });
 

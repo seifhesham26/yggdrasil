@@ -2,12 +2,10 @@
 
 import { FormEvent, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { ArrowUpRight } from "lucide-react";
 import { authClient } from "@/auth/auth-client";
 
 export function OwnerAuthForm({ setupAvailable }: { setupAvailable: boolean }) {
-  const router = useRouter();
   const [mode, setMode] = useState<"setup" | "sign-in">(setupAvailable ? "setup" : "sign-in");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -27,8 +25,9 @@ export function OwnerAuthForm({ setupAvailable }: { setupAvailable: boolean }) {
         setError(result.error.message ?? (mode === "setup" ? "Could not create the owner account." : "Unable to sign in."));
         return;
       }
-      router.push("/library");
-      router.refresh();
+      // A full navigation lets the protected page read the newly set auth cookie.
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+      window.location.assign("/library");
     } catch {
       setError("The account service is unavailable. Check the database connection and try again.");
     } finally {

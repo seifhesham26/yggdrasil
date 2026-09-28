@@ -82,6 +82,24 @@ function scaledFixture(name: string, scale: number) {
   return { model: { relativePath: `${name}.gltf`, bytes: new TextEncoder().encode(JSON.stringify(model)) }, binary: { relativePath: `${name}.bin`, bytes: binary } };
 }
 
+function animationGlbFixture() {
+  const fixture = createGltfFixture();
+  const document = JSON.parse(new TextDecoder().decode(fixture.model.bytes));
+  delete document.buffers[0].uri;
+  document.animations[0].name = "Imported Rise";
+  const encoded = new TextEncoder().encode(JSON.stringify(document));
+  const jsonLength = Math.ceil(encoded.length / 4) * 4;
+  const binLength = Math.ceil(fixture.binary.bytes.length / 4) * 4;
+  const glb = new Uint8Array(12 + 8 + jsonLength + 8 + binLength);
+  const view = new DataView(glb.buffer);
+  view.setUint32(0, 0x46546c67, true); view.setUint32(4, 2, true); view.setUint32(8, glb.length, true);
+  view.setUint32(12, jsonLength, true); view.setUint32(16, 0x4e4f534a, true);
+  glb.fill(0x20, 20, 20 + jsonLength); glb.set(encoded, 20);
+  view.setUint32(20 + jsonLength, binLength, true); view.setUint32(24 + jsonLength, 0x004e4942, true);
+  glb.set(fixture.binary.bytes, 28 + jsonLength);
+  return glb;
+}
+
 try {
   await client.connect();
   connected = true;
@@ -378,6 +396,43 @@ try {
   const storedAfterAnimation = await (await page.request.get(fileUrl)).body();
   if (createHash("sha256").update(storedAfterAnimation).digest("hex") !== sourceHash) throw new Error("Animation edits changed original model bytes.");
   console.log(`EMBEDDED_CLIP_RELOAD_GATE_PASS: source and project copies, preview transport (scrub screenshot difference ${clipVisualDifference.toFixed(2)}), duplicate/remove, trim/speed/loop/disable, saved reload, unchanged source hash.`);
+
+  const importedGlb = animationGlbFixture();
+  const importedSourceHash = createHash("sha256").update(importedGlb).digest("hex");
+  await page.getByLabel("Import animation").setInputFiles({ name: "imported-rise.glb", mimeType: "model/gltf-binary", buffer: Buffer.from(importedGlb) });
+  await page.getByRole("combobox", { name: "Map Animated_Triangle" }).waitFor();
+  if (await page.getByRole("combobox", { name: "Map Animated_Triangle" }).inputValue() !== "Animated_Triangle") throw new Error("Compatible imported track was not mapped to the retained model node.");
+  await page.getByRole("button", { name: "Attach imported clip" }).click();
+  await page.locator(".save-state").getByText("Saved").waitFor();
+  await page.getByRole("list", { name: "Imported clips" }).getByRole("button", { name: "Imported Rise" }).waitFor();
+  await page.getByLabel("Scrub clip").fill("0");
+  await page.waitForTimeout(200);
+  const importedStart = await page.getByRole("region", { name: "Project preview" }).locator(".viewer-stage").screenshot();
+  await page.getByLabel("Scrub clip").fill("1");
+  await page.waitForTimeout(200);
+  const importedEnd = await page.getByRole("region", { name: "Project preview" }).locator(".viewer-stage").screenshot();
+  const importedDifference = await meanPixelDifference(importedStart, importedEnd);
+  if (importedDifference < 0.5) throw new Error(`Imported clip did not visibly change the model pose (${importedDifference.toFixed(2)}).`);
+  const importedState = await (await page.request.get(`/api/projects/${projectId}`)).json() as { project: { revision: number; snapshot: { animation: { importedClips: Array<{ id: string; sourceSha256: string; sourceStorageKey: string; tracks: Array<{ targetNode: string }> }> } } } };
+  const [attachedImport] = importedState.project.snapshot.animation.importedClips;
+  if (attachedImport.sourceSha256 !== importedSourceHash || attachedImport.tracks[0].targetNode !== "Animated_Triangle") throw new Error("Imported source hash or saved target mapping differs from the uploaded fixture.");
+  const persistedImport = await (await import("node:fs/promises")).readFile(join(assetRoot, ...attachedImport.sourceStorageKey.split("/")));
+  if (createHash("sha256").update(persistedImport).digest("hex") !== importedSourceHash) throw new Error("Private imported source bytes changed.");
+  await page.reload();
+  await page.getByRole("list", { name: "Imported clips" }).getByRole("button", { name: "Imported Rise" }).click();
+  await page.getByLabel("Scrub clip").fill("1");
+  await page.getByRole("img", { name: "3D model preview" }).waitFor();
+
+  const incompatibleManifest = Buffer.from(JSON.stringify({ name: "Missing", tracks: [{ target: "AbsentBone", path: "position", times: [0, 1], values: [0, 0, 0, 1, 0, 0] }] }));
+  await page.getByLabel("Import animation").setInputFiles({ name: "missing.json", mimeType: "application/json", buffer: incompatibleManifest });
+  await page.getByRole("combobox", { name: "Map AbsentBone" }).waitFor();
+  if (await page.getByRole("button", { name: "Attach imported clip" }).isEnabled()) throw new Error("Missing imported target could be attached.");
+  const tampered = await page.request.post(`/api/projects/${projectId}/animation-import`, { data: { fileName: "imported-rise.glb", bytesBase64: Buffer.from(importedGlb).toString("base64"), clip: { ...attachedImport, tracks: [{ ...attachedImport.tracks[0], values: [9, 9, 9, 9, 9, 9] }] } } });
+  if (tampered.status() !== 400) throw new Error(`Tampered imported keyframes were accepted (${tampered.status()}).`);
+  const afterRejected = await (await page.request.get(`/api/projects/${projectId}`)).json() as typeof importedState;
+  if (afterRejected.project.revision !== importedState.project.revision || afterRejected.project.snapshot.animation.importedClips.length !== 1) throw new Error("Rejected import changed the project revision or clips.");
+  if (createHash("sha256").update(await (await page.request.get(fileUrl)).body()).digest("hex") !== sourceHash) throw new Error("Imported animation changed original model bytes.");
+  console.log(`IMPORTED_CLIP_RELOAD_GATE_PASS: GLB mapping, private SHA-256 ${importedSourceHash}, reload, rejected missing/tampered imports, unchanged revision/source hash, pose difference ${importedDifference.toFixed(2)}.`);
 
   await page.emulateMedia({ reducedMotion: "reduce" });
   for (const [name, scale] of [["tiny", 0.00001], ["large", 100000]] as const) {

@@ -135,6 +135,17 @@ export async function analyzeGltf(storage: AssetStorage, primaryKey: StorageKey)
     max: [0, 1, 2].map((index) => Math.max(...finiteBounds.map((item) => item.max[index]))) as [number, number, number],
   } : null;
   const rawExtensions = metadata.extensions && typeof metadata.extensions === "object" ? metadata.extensions as Record<string, unknown> : {};
+  const rawNodes = Array.isArray(metadata.nodes) ? metadata.nodes as Array<{ name?: string; children?: number[]; translation?: number[]; rotation?: number[]; scale?: number[] }> : [];
+  const rawSkins = Array.isArray(metadata.skins) ? metadata.skins as Array<{ joints?: number[] }> : [];
+  const boneIndices = new Set(rawSkins.flatMap((skin) => skin.joints ?? []));
+  const parentIndices = new Map<number, number>();
+  rawNodes.forEach((node, parentIndex) => node.children?.forEach((childIndex) => parentIndices.set(childIndex, parentIndex)));
+  const rigNodes = rawNodes.filter((node) => node.name).map((node) => {
+    const index = rawNodes.indexOf(node);
+    const parent = parentIndices.get(index);
+    return { name: node.name!, parentName: parent === undefined ? null : rawNodes[parent]?.name ?? null, isBone: boneIndices.has(index),
+      position: (node.translation ?? [0, 0, 0]) as [number, number, number], rotation: (node.rotation ?? [0, 0, 0, 1]) as [number, number, number, number], scale: (node.scale ?? [1, 1, 1]) as [number, number, number] };
+  });
   const punctual = rawExtensions.KHR_lights_punctual && typeof rawExtensions.KHR_lights_punctual === "object"
     ? rawExtensions.KHR_lights_punctual as Record<string, unknown> : {};
   const lightCount = Array.isArray(punctual.lights) ? punctual.lights.length : 0;
@@ -159,6 +170,7 @@ export async function analyzeGltf(storage: AssetStorage, primaryKey: StorageKey)
     bounds,
     animations,
     nodeNames: nodes.map((node) => node.getName()).filter(Boolean).sort(),
+    rigNodes,
     extensionsUsed,
     warnings,
   };

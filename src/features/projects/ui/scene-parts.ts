@@ -3,7 +3,7 @@ import type { ProjectSnapshot } from "../domain/project-state";
 
 type AppearanceOverride = ProjectSnapshot["appearance"]["nodes"][string];
 export type ScenePart = { id: string; name: string; type: string; object: Object3D };
-export type PartSummary = { id: string; name: string; type: string; visible: boolean; position: [number, number, number]; worldPosition?: [number, number, number]; rotation: [number, number, number]; scale: [number, number, number]; materialName?: string; textureName?: string; hasUv?: boolean; color?: string; opacity?: number; roughness?: number; metalness?: number };
+export type PartSummary = { id: string; name: string; type: string; parentName?: string; visible: boolean; position: [number, number, number]; worldPosition?: [number, number, number]; rotation: [number, number, number]; scale: [number, number, number]; materialName?: string; textureName?: string; hasUv?: boolean; color?: string; opacity?: number; roughness?: number; metalness?: number };
 
 export function summarizePart(part: ScenePart): PartSummary {
   const { object } = part;
@@ -12,6 +12,7 @@ export function summarizePart(part: ScenePart): PartSummary {
   const worldPosition = object.getWorldPosition(new Vector3());
   return {
     id: part.id, name: part.name, type: part.type, visible: object.visible,
+    ...(object.parent?.name ? { parentName: object.parent.name } : {}),
     position: [object.position.x, object.position.y, object.position.z],
     worldPosition: [worldPosition.x, worldPosition.y, worldPosition.z],
     rotation: [object.rotation.x, object.rotation.y, object.rotation.z],

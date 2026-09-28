@@ -34,6 +34,7 @@ export type AssetAnalysis = {
   bounds: { min: [number, number, number]; max: [number, number, number] } | null;
   animations: Array<{ name: string; durationSeconds: number; channels: number; sourceIndex?: number; targets?: Array<{ nodeName: string; path: string }>; usesSkeleton?: boolean; usesMorph?: boolean }>;
   nodeNames: string[];
+  rigNodes?: Array<{ name: string; parentName: string | null; isBone: boolean; position: [number, number, number]; rotation: [number, number, number, number]; scale: [number, number, number] }>;
   extensionsUsed: string[];
   warnings: Array<{ code: string; severity: "info" | "warning" | "error"; message: string }>;
 };

@@ -12,9 +12,16 @@ import { SceneControls, type PreviewSize } from "./scene-controls";
 import { InteractionControls } from "./interaction-controls";
 import { AnimationControls } from "./animation-controls";
 import { sourceClipEdit, type ClipSource } from "@/features/viewer/animation-clips";
+import type { ImportedClipAttachment } from "@/features/viewer/imported-clips";
 
 type Model = { modelUrl: string; primaryRelativePath: string; files: ViewerFile[] };
 type SaveStatus = "saved" | "unsaved" | "saving" | "error";
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  return btoa(binary);
+}
 
 export function ProjectEditor({ initialState, assetName, model }: { initialState: ProjectState; assetName: string; model: Model }) {
   const [serverState, setServerState] = useState(initialState);
@@ -91,6 +98,33 @@ export function ProjectEditor({ initialState, assetName, model }: { initialState
     }
   }
 
+  async function importClip(file: File, clip: ImportedClipAttachment) {
+    if (busy) return;
+    setStatus("saving");
+    setMessage(null);
+    try {
+      const response = await fetch(`${endpoint}/animation-import`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ fileName: file.name, bytesBase64: bytesToBase64(new Uint8Array(await file.arrayBuffer())), clip }) });
+      if (!response.ok) {
+        const details = await response.json().catch(() => ({}));
+        throw new Error(details.message ?? `Animation import failed (${response.status}).`);
+      }
+      const state = await response.json() as ProjectState;
+      setServerState(state);
+      setSnapshot(state.project.snapshot);
+      setActiveStep(state.project.activeStep);
+      setSelectedClipKey(state.project.snapshot.animation.importedClips.at(-1)?.id ?? null);
+      setClipProgress(0);
+      setClipPlaying(false);
+      setClipRestartToken((value) => value + 1);
+      setUndoStack([]);
+      setRedoStack([]);
+      setStatus("saved");
+    } catch (error) {
+      setStatus("saved");
+      throw error instanceof Error ? error : new Error("Animation import failed. Retry.");
+    }
+  }
+
   async function navigate(step: ProjectStepName) {
     if (step === activeStep || busy) return;
     if (dirty || status === "error") { await save(step); return; }
@@ -159,6 +193,7 @@ export function ProjectEditor({ initialState, assetName, model }: { initialState
   const selectedCopy = snapshot.animation.embeddedClips.find((clip) => clip.id === selectedClipKey);
   const sourceIndex = selectedCopy?.sourceIndex ?? (selectedClipKey?.startsWith("source-") ? Number(selectedClipKey.slice(7)) : -1);
   const selectedSource = clipSources[sourceIndex];
+  const selectedImported = snapshot.animation.importedClips.find((clip) => clip.id === selectedClipKey) ?? null;
   const previewClip = useMemo(() => selectedCopy ?? (selectedSource ? { ...sourceClipEdit(selectedSource), id: `source-${sourceIndex}` } : null), [selectedCopy, selectedSource, sourceIndex]);
   return <main className="project-editor">
     <div className="project-editor-header">
@@ -168,11 +203,11 @@ export function ProjectEditor({ initialState, assetName, model }: { initialState
     {message ? <div role="alert" className="project-save-error"><span>{message}</span><button type="button" onClick={() => void save(pendingStep ?? activeStep)}>Retry save</button></div> : null}
     <nav className="project-step-nav" aria-label="Project steps"><ol>{projectStepNames.map((step, index) => { const record = serverState.steps.find((item) => item.name === step); return <li key={step}><button type="button" aria-label={`${step} step`} aria-current={activeStep === step ? "step" : undefined} onClick={() => void navigate(step)} disabled={busy}><span>{String(index + 1).padStart(2, "0")}</span><strong>{step}</strong><small>{activeStep === step && (dirty || status === "error") ? "Unsaved" : record?.status ?? "not-started"}</small></button></li>; })}</ol></nav>
     <div className="project-editor-grid">
-      <section className="project-editor-preview" aria-label="Project preview" data-preview-size={previewSize}><ModelCanvasLoader key={previewingInteractions && activeStep === "Interactions" ? "preview" : "edit"} {...model} presentation={{ snapshot, onParts, onSelectPart: selectFromViewport, onMissingParts, previewInteractions: previewingInteractions && activeStep === "Interactions", onClips, onAnimationProgress, animationPreview: activeStep === "Animate" ? { clip: previewClip, playing: clipPlaying, progress: clipProgress, restartToken: clipRestartToken } : undefined }} /></section>
+      <section className="project-editor-preview" aria-label="Project preview" data-preview-size={previewSize}><ModelCanvasLoader key={previewingInteractions && activeStep === "Interactions" ? "preview" : "edit"} {...model} presentation={{ snapshot, onParts, onSelectPart: selectFromViewport, onMissingParts, previewInteractions: previewingInteractions && activeStep === "Interactions", onClips, onAnimationProgress, animationPreview: activeStep === "Animate" ? { clip: previewClip, importedClip: selectedImported, playing: clipPlaying, progress: clipProgress, restartToken: clipRestartToken } : undefined }} /></section>
       <section className="project-editor-panel" aria-label={`${activeStep} controls`}>
         <p className="section-kicker">Step {projectStepNames.indexOf(activeStep) + 1} of 8</p><h2>{activeStep}</h2>
         <fieldset disabled={busy}>
-          {activeStep === "Appearance" ? <AppearanceControls snapshot={snapshot} parts={parts} selectedId={selectedId} selectionOrigin={selectionOrigin} onSelect={selectFromHierarchy} onChange={edit} missing={missingParts} /> : activeStep === "Scene" ? <SceneControls key={snapshot.scene.camera.fov} snapshot={snapshot} onChange={edit} previewSize={previewSize} onPreviewSize={setPreviewSize} /> : activeStep === "Interactions" ? <InteractionControls snapshot={snapshot} parts={parts} previewing={previewingInteractions} onPreview={setPreviewingInteractions} onChange={edit} /> : activeStep === "Animate" ? <AnimationControls snapshot={snapshot} sources={clipSources} selectedKey={selectedClipKey} progress={clipProgress} playing={clipPlaying} onSelect={selectClip} onProgress={(progress) => { setClipProgress(progress); setClipPlaying(false); }} onPlaying={setClipPlaying} onRestart={() => { setClipProgress(0); setClipRestartToken((value) => value + 1); }} onChange={edit} /> : <p>This step is available for navigation. Its editing controls follow in the roadmap.</p>}
+          {activeStep === "Appearance" ? <AppearanceControls snapshot={snapshot} parts={parts} selectedId={selectedId} selectionOrigin={selectionOrigin} onSelect={selectFromHierarchy} onChange={edit} missing={missingParts} /> : activeStep === "Scene" ? <SceneControls key={snapshot.scene.camera.fov} snapshot={snapshot} onChange={edit} previewSize={previewSize} onPreviewSize={setPreviewSize} /> : activeStep === "Interactions" ? <InteractionControls snapshot={snapshot} parts={parts} previewing={previewingInteractions} onPreview={setPreviewingInteractions} onChange={edit} /> : activeStep === "Animate" ? <AnimationControls snapshot={snapshot} sources={clipSources} parts={parts} selectedKey={selectedClipKey} progress={clipProgress} playing={clipPlaying} onSelect={selectClip} onProgress={(progress) => { setClipProgress(progress); setClipPlaying(false); }} onPlaying={setClipPlaying} onRestart={() => { setClipProgress(0); setClipRestartToken((value) => value + 1); }} onChange={edit} onImport={dirty ? undefined : importClip} /> : <p>This step is available for navigation. Its editing controls follow in the roadmap.</p>}
         </fieldset>
       </section>
     </div>

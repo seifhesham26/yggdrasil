@@ -1,12 +1,14 @@
 import { AnimationClip, type Object3D } from "three";
 import type { ProjectSnapshot } from "@/features/projects/domain/project-state";
+import type { ImportedClipAttachment } from "./imported-clips";
 
 export type ClipSource = {
   sourceIndex: number; name: string; durationSeconds: number;
   targets: string[]; usesSkeleton: boolean; usesMorph: boolean; missingTargets: string[];
 };
 export type ClipEdit = ProjectSnapshot["animation"]["embeddedClips"][number];
-export type AnimationPreview = { clip: ClipEdit | null; playing: boolean; progress: number; restartToken: number };
+export type ClipTimingEdit = Pick<ClipEdit, "trimStart" | "trimEnd" | "speed" | "loop" | "enabled">;
+export type AnimationPreview = { clip: ClipEdit | null; importedClip?: ImportedClipAttachment | null; playing: boolean; progress: number; restartToken: number };
 
 export function inspectClips(clips: AnimationClip[], scene: Object3D): ClipSource[] {
   const names = new Set<string>();
@@ -37,11 +39,11 @@ export function playableClip(source: AnimationClip, missingTargets: string[]): A
   return new AnimationClip(source.name, source.duration, source.tracks.filter((track) => !missing.has(track.name.split(".")[0])));
 }
 
-export function clipTime(edit: ClipEdit, progress: number): number {
+export function clipTime(edit: ClipTimingEdit, progress: number): number {
   return edit.trimStart + Math.max(0, Math.min(1, progress)) * (edit.trimEnd - edit.trimStart);
 }
 
-export function advanceClip(edit: ClipEdit, current: number, delta: number, direction: 1 | -1): { time: number; direction: 1 | -1; finished: boolean } {
+export function advanceClip(edit: ClipTimingEdit, current: number, delta: number, direction: 1 | -1): { time: number; direction: 1 | -1; finished: boolean } {
   const next = current + delta * edit.speed * direction;
   if (next >= edit.trimStart && next <= edit.trimEnd) return { time: next, direction, finished: false };
   if (edit.loop === "once") return { time: direction === 1 ? edit.trimEnd : edit.trimStart, direction, finished: true };
