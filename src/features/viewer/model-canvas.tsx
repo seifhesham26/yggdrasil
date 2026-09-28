@@ -21,6 +21,7 @@ export type ProjectPresentation = {
   animationPreview?: AnimationPreview;
   onClips?: (clips: ClipSource[]) => void;
   onAnimationProgress?: (progress: number, finished: boolean) => void;
+  onSequenceWarnings?: (warnings: string[]) => void;
   previewInteractions?: boolean;
 };
 
@@ -96,7 +97,7 @@ export function ModelCanvas({ modelUrl, primaryRelativePath, files, presentation
             {showGrid ? <Grid position={[0, -1.2, 0]} infiniteGrid cellSize={0.5} sectionSize={2} cellColor="#21414a" sectionColor="#315862" fadeDistance={35} fadeStrength={1.4} /> : null}
             {sceneSettings?.controls !== "disabled" ? <OrbitControls key={`${resetVersion}:${focusTarget?.join(",") ?? "default"}`} makeDefault enableDamping minDistance={presentation ? 1e-9 : 0.01} maxDistance={presentation ? 1e12 : 10000} target={focusTarget ?? sceneSettings?.camera.target} autoRotate={sceneSettings?.controls === "turntable" && !reducedMotion && !sceneSettings?.reducedMotion} /> : null}
             <Bounds fit={!presentation} clip observe margin={1.3}>
-              <ModelScene key={modelUrl} modelUrl={modelUrl} primaryRelativePath={primaryRelativePath} files={files} autoPlay={!presentation && !reducedMotion && !sceneSettings?.reducedMotion} frameVersion={frameVersion} frameOnLoad={!presentation} frameCamera={sceneSettings?.camera} appearance={presentation?.snapshot.appearance.nodes} previewHiddenIds={presentation?.previewInteractions ? hiddenIds : undefined} animationPreview={presentation?.animationPreview} onClips={presentation?.onClips} onAnimationProgress={presentation?.onAnimationProgress} onParts={presentation ? handleParts : undefined} onSelectPart={presentation?.previewInteractions ? undefined : presentation?.onSelectPart} onInteract={presentation?.previewInteractions ? handleInteraction : undefined} onMissingParts={presentation?.onMissingParts} onReady={onReady} />
+              <ModelScene key={modelUrl} modelUrl={modelUrl} primaryRelativePath={primaryRelativePath} files={files} autoPlay={!presentation && !reducedMotion && !sceneSettings?.reducedMotion} frameVersion={frameVersion} frameOnLoad={!presentation} frameCamera={sceneSettings?.camera} appearance={presentation?.snapshot.appearance.nodes} previewHiddenIds={presentation?.previewInteractions ? hiddenIds : undefined} animationPreview={presentation?.animationPreview} onClips={presentation?.onClips} onAnimationProgress={presentation?.onAnimationProgress} onSequenceWarnings={presentation?.onSequenceWarnings} onParts={presentation ? handleParts : undefined} onSelectPart={presentation?.previewInteractions ? undefined : presentation?.onSelectPart} onInteract={presentation?.previewInteractions ? handleInteraction : undefined} onMissingParts={presentation?.onMissingParts} onReady={onReady} />
             </Bounds>
           </Canvas>
           {loading ? <div className="viewer-loading" role="progressbar" aria-label="Loading model" aria-valuetext="Loading model"><span className="viewer-loader-orbit" aria-hidden="true" />Loading model</div> : null}

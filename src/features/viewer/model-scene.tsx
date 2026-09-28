@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useBounds } from "@react-three/drei";
-import { AnimationMixer, BufferGeometry, LoadingManager, Material, type AnimationAction, type Object3D, Texture } from "three";
+import { AnimationMixer, BufferGeometry, LoadingManager, Material, type AnimationAction, type AnimationClip, type Object3D, Texture } from "three";
 import { GLTFLoader, type GLTF } from "three/addons/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 import { clone as cloneSkeleton } from "three/addons/utils/SkeletonUtils.js";
@@ -13,6 +13,7 @@ import { applyAppearance, indexSceneParts, summarizePart, type PartSummary } fro
 import { projectFramePosition } from "./project-framing";
 import { advanceClip, clipTime, inspectClips, playableClip, type AnimationPreview, type ClipSource } from "./animation-clips";
 import { importedClipAnimation } from "./imported-clips";
+import { SequencePlayer, sequenceDuration, sequenceWarnings } from "./clip-sequence";
 
 const TRANSPARENT_PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/9xkAAAAASUVORK5CYII=";
 
@@ -69,7 +70,7 @@ export function disposeLoadedScene(root: Object3D): void {
   for (const texture of textures) texture.dispose();
 }
 
-export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, frameVersion, frameOnLoad = true, frameCamera, appearance, previewHiddenIds, animationPreview, onClips, onAnimationProgress, onParts, onSelectPart, onInteract, onMissingParts, onReady }: {
+export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, frameVersion, frameOnLoad = true, frameCamera, appearance, previewHiddenIds, animationPreview, onClips, onAnimationProgress, onSequenceWarnings, onParts, onSelectPart, onInteract, onMissingParts, onReady }: {
   modelUrl: string;
   primaryRelativePath: string;
   files: ViewerFile[];
@@ -82,6 +83,7 @@ export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, fra
   animationPreview?: AnimationPreview;
   onClips?: (clips: ClipSource[]) => void;
   onAnimationProgress?: (progress: number, finished: boolean) => void;
+  onSequenceWarnings?: (warnings: string[]) => void;
   onParts?: (parts: PartSummary[]) => void;
   onSelectPart?: (id: string) => void;
   onInteract?: (id: string, trigger: "click" | "hover") => void;
@@ -92,6 +94,7 @@ export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, fra
   const [loadError, setLoadError] = useState<Error | null>(null);
   const mixer = useRef<AnimationMixer | null>(null);
   const playback = useRef<{ mixer: AnimationMixer; action: AnimationAction; time: number; direction: 1 | -1; lastReport: number } | null>(null);
+  const sequencePlayback = useRef<{ player: SequencePlayer; time: number; duration: number; lastReport: number } | null>(null);
   const bounds = useBounds();
   const camera = useThree((state) => state.camera);
   const sceneData = useMemo(() => {
@@ -155,9 +158,37 @@ export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, fra
 
   const selected = animationPreview?.clip;
   const imported = animationPreview?.importedClip ?? null;
+  const sequence = animationPreview?.sequence ?? null;
   const selectedEdit = selected ?? imported;
   const hasAnimationPreview = animationPreview !== undefined;
+  const sequenceClips = useMemo(() => {
+    const clips = new Map<string, AnimationClip>();
+    if (!sequence || !gltf) return clips;
+    for (const edit of sequence.embeddedClips) {
+      const source = gltf.animations[edit.sourceIndex];
+      if (source) clips.set(edit.id, playableClip(source, sources[edit.sourceIndex]?.missingTargets ?? []));
+    }
+    for (const edit of sequence.importedClips) clips.set(edit.id, importedClipAnimation(edit));
+    return clips;
+  }, [sequence, gltf, sources]);
   useEffect(() => {
+    if (!scene || !sequence) return;
+    const edits = new Map([...sequence.embeddedClips, ...sequence.importedClips].map((edit) => [edit.id, edit]));
+    const warnings = sequenceWarnings(sequence.sequence, sequenceClips);
+    for (const edit of sequence.embeddedClips) {
+      const missing = sources[edit.sourceIndex]?.missingTargets ?? [];
+      if (missing.length && sequence.sequence.some((item) => item.clipId === edit.id)) warnings.push(`Clip ${edit.name} has missing targets: ${missing.join(", ")}.`);
+    }
+    onSequenceWarnings?.(warnings);
+    const player = new SequencePlayer(scene, sequence.sequence, edits, sequenceClips);
+    const duration = sequenceDuration(sequence.sequence);
+    const time = 0;
+    player.seek(time, sequence.sequenceLoop);
+    sequencePlayback.current = { player, time, duration, lastReport: 0 };
+    return () => { player.dispose(); if (sequencePlayback.current?.player === player) sequencePlayback.current = null; };
+  }, [scene, sequence, sequenceClips, sources, animationPreview?.restartToken, onSequenceWarnings]);
+  useEffect(() => {
+    if (sequence) return;
     if (!scene || (!gltf?.animations.length && !imported)) return;
     const animations = gltf?.animations ?? [];
     const source = imported ? importedClipAnimation(imported) : selected ? animations[selected.sourceIndex] : !hasAnimationPreview && autoPlay ? animations[0] : null;
@@ -177,7 +208,14 @@ export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, fra
       if (mixer.current === current) mixer.current = null;
       if (playback.current?.mixer === current) playback.current = null;
     };
-  }, [scene, gltf, selected, imported, selectedEdit, animationPreview?.restartToken, sources, autoPlay, hasAnimationPreview]);
+  }, [scene, gltf, selected, imported, selectedEdit, sequence, animationPreview?.restartToken, sources, autoPlay, hasAnimationPreview]);
+
+  useEffect(() => {
+    const state = sequencePlayback.current;
+    if (!sequence || !state || animationPreview?.playing) return;
+    state.time = state.duration * (animationPreview?.progress ?? 0);
+    state.player.seek(state.time, sequence.sequenceLoop);
+  }, [sequence, animationPreview?.progress, animationPreview?.playing]);
 
   useEffect(() => {
     if (!selectedEdit || !playback.current || animationPreview?.playing) return;
@@ -188,6 +226,20 @@ export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, fra
   }, [animationPreview?.progress, animationPreview?.playing, selectedEdit, gltf]);
 
   useFrame((_, delta) => {
+    const sequenceState = sequencePlayback.current;
+    if (sequence && sequenceState) {
+      if (!animationPreview?.playing || !sequenceState.duration) return;
+      const next = sequenceState.time + Math.min(delta, 0.1);
+      const finished = !sequence.sequenceLoop && next >= sequenceState.duration;
+      sequenceState.time = sequence.sequenceLoop ? next % sequenceState.duration : Math.min(next, sequenceState.duration);
+      sequenceState.player.seek(sequenceState.time, sequence.sequenceLoop);
+      const now = performance.now();
+      if (finished || now - sequenceState.lastReport > 100) {
+        sequenceState.lastReport = now;
+        onAnimationProgress?.(sequenceState.time / sequenceState.duration, finished);
+      }
+      return;
+    }
     const state = playback.current;
     if (!state || !selectedEdit) { mixer.current?.update(delta); return; }
     if (!animationPreview?.playing) return;

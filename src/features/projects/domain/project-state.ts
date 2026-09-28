@@ -46,16 +46,31 @@ const ImportedClip = z.object({
   sourceStorageKey: z.string().min(1).max(500), sourceSha256: z.string().regex(/^[a-f0-9]{64}$/i),
   durationSeconds: z.number().positive().finite(), trimStart: z.number().min(0).finite(), trimEnd: z.number().positive().finite(), speed: z.number().min(0.05).max(8).finite(), loop: z.enum(["once", "repeat", "pingpong"]), tracks: z.array(ImportedTrack).max(500), mapping: z.array(ImportedMapping).max(500), enabled: z.boolean(),
 }).strict().refine((clip) => clip.trimEnd > clip.trimStart, "Imported clip trim end must follow trim start.").refine((clip) => clip.mapping.every((entry) => entry.targetBone && entry.status !== "missing" && entry.status !== "ambiguous") && clip.tracks.every((entry) => entry.targetNode && entry.status !== "missing" && entry.status !== "ambiguous"), "Imported clip mapping must be resolved before attachment.");
+const SequenceSegment = z.object({
+  id: z.string().uuid(), clipId: z.string().uuid(), durationSeconds: z.number().positive().max(3600).finite(),
+  overlapSeconds: z.number().min(0).max(60).finite(), sourceOffsetSeconds: z.number().min(0).finite(),
+  weight: z.number().min(0).max(1).finite(), enabled: z.boolean(),
+}).strict();
+const ClipSequence = z.array(SequenceSegment).max(200).superRefine((items, context) => {
+  items.forEach((item, index) => {
+    if (item.overlapSeconds > (index ? Math.min(item.durationSeconds, items[index - 1].durationSeconds) : 0)) {
+      context.addIssue({ code: "custom", path: [index, "overlapSeconds"], message: "Overlap must fit both adjacent segments; the first overlap must be zero." });
+    }
+    if (index > 0 && index < items.length - 1 && item.overlapSeconds + items[index + 1].overlapSeconds > item.durationSeconds) {
+      context.addIssue({ code: "custom", path: [index, "durationSeconds"], message: "Adjacent overlaps cannot consume the whole segment." });
+    }
+  });
+});
 
 export const ProjectSnapshotSchema = z.object({
   schemaVersion: z.literal(1), appearance: z.object({ nodes: z.record(z.string(), AppearanceOverride) }).strict(), scene: SceneSettings,
-  interactions: z.array(Interaction).max(200), animation: z.object({ embeddedClips: z.array(EmbeddedClip).max(200), importedClips: z.array(ImportedClip).max(200), clips: z.array(z.record(z.string(), z.unknown())).max(200), timelines: z.array(z.record(z.string(), z.unknown())).max(50) }).strict(),
+  interactions: z.array(Interaction).max(200), animation: z.object({ embeddedClips: z.array(EmbeddedClip).max(200), importedClips: z.array(ImportedClip).max(200), sequence: ClipSequence, sequenceLoop: z.boolean(), clips: z.array(z.record(z.string(), z.unknown())).max(200), timelines: z.array(z.record(z.string(), z.unknown())).max(50) }).strict(),
   export: z.object({ loadingPolicy: z.enum(["on-demand", "metadata-first", "critical-assets", "full-preload"]), criticalAssetIds: z.array(z.string()).max(500) }).strict(),
 }).strict();
 export type ProjectSnapshot = z.infer<typeof ProjectSnapshotSchema>;
 
 export function defaultProjectSnapshot(): ProjectSnapshot {
-  return { schemaVersion: 1, appearance: { nodes: {} }, scene: { background: "#111417", environment: "studio", exposure: 0, camera: { position: [3, 2, 5], target: [0, 0, 0], fov: 45 }, shadows: true, controls: "orbit", reducedMotion: false }, interactions: [], animation: { embeddedClips: [], importedClips: [], clips: [], timelines: [] }, export: { loadingPolicy: "metadata-first", criticalAssetIds: [] } };
+  return { schemaVersion: 1, appearance: { nodes: {} }, scene: { background: "#111417", environment: "studio", exposure: 0, camera: { position: [3, 2, 5], target: [0, 0, 0], fov: 45 }, shadows: true, controls: "orbit", reducedMotion: false }, interactions: [], animation: { embeddedClips: [], importedClips: [], sequence: [], sequenceLoop: false, clips: [], timelines: [] }, export: { loadingPolicy: "metadata-first", criticalAssetIds: [] } };
 }
 
 function migrateLegacy(input: unknown): unknown {

@@ -24,6 +24,25 @@ describe("ProjectHistory", () => {
     await expect(history.save({ ownerId: "owner-1", projectId: created.project.id, expectedRevision: 7, snapshot: defaultProjectSnapshot(), activeStep: "Appearance" })).rejects.toThrow(/stale/i);
   });
 
+  it("stores sequence order and crossfade settings in revision history", async () => {
+    const history = new ProjectHistory(new InMemoryProjectRepository({ "asset-1": "version-1" }));
+    const created = await history.create({ ownerId: "owner-1", assetId: "asset-1" });
+    const clipId = crypto.randomUUID();
+    const snapshot = defaultProjectSnapshot();
+    snapshot.animation.embeddedClips = [{ id: clipId, sourceIndex: 0, name: "Rise", enabled: true, trimStart: 0, trimEnd: 1, speed: 1, loop: "repeat" }];
+    snapshot.animation.sequence = [
+      { id: crypto.randomUUID(), clipId, durationSeconds: 1, overlapSeconds: 0, sourceOffsetSeconds: 0, weight: 1, enabled: true },
+      { id: crypto.randomUUID(), clipId, durationSeconds: 1, overlapSeconds: 0.25, sourceOffsetSeconds: 0.2, weight: 0.8, enabled: true },
+    ];
+    snapshot.animation.sequenceLoop = true;
+    await history.save({ ownerId: "owner-1", projectId: created.project.id, expectedRevision: 0, snapshot, activeStep: "Animate" });
+    const reopened = await history.load("owner-1", created.project.id);
+    expect(reopened?.project.snapshot.animation.sequence).toEqual(snapshot.animation.sequence);
+    expect(reopened?.project.snapshot.animation.sequenceLoop).toBe(true);
+    expect((await history.undo("owner-1", created.project.id)).project.snapshot.animation.sequence).toEqual([]);
+    expect((await history.redo("owner-1", created.project.id)).project.snapshot.animation.sequence).toEqual(snapshot.animation.sequence);
+  });
+
   it("requires an explicit retained asset version fixture", async () => {
     const history = new ProjectHistory(new InMemoryProjectRepository({}));
     await expect(history.create({ ownerId: "owner-1", assetId: "asset-1" })).rejects.toThrow(/fixture/i);

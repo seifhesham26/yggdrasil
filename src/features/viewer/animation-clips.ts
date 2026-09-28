@@ -8,7 +8,7 @@ export type ClipSource = {
 };
 export type ClipEdit = ProjectSnapshot["animation"]["embeddedClips"][number];
 export type ClipTimingEdit = Pick<ClipEdit, "trimStart" | "trimEnd" | "speed" | "loop" | "enabled">;
-export type AnimationPreview = { clip: ClipEdit | null; importedClip?: ImportedClipAttachment | null; playing: boolean; progress: number; restartToken: number };
+export type AnimationPreview = { clip: ClipEdit | null; importedClip?: ImportedClipAttachment | null; sequence?: ProjectSnapshot["animation"] | null; playing: boolean; progress: number; restartToken: number };
 
 export function inspectClips(clips: AnimationClip[], scene: Object3D): ClipSource[] {
   const names = new Set<string>();

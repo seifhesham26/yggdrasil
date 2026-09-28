@@ -62,7 +62,7 @@ test("owner imports models, reopens previews, and completes optimization workflo
     page.waitForResponse((candidate) => candidate.url().includes("/api/auth/sign-up/email")),
     page.getByRole("button", { name: "Create owner account" }).click(),
   ]);
-  expect(signupResponse.status(), await signupResponse.text()).toBe(200);
+  expect(signupResponse.status()).toBe(200);
   await expect(page).toHaveURL(/\/library$/);
 
   const { model, binary } = createGltfFixture();
