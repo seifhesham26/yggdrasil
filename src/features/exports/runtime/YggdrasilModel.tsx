@@ -97,13 +97,20 @@ function applyAppearance(parts: Part[], config: YggdrasilConfig["config"]) {
 
 export function YggdrasilModel({ manifest, assetBaseUrl, className, onLoad, onError, onProgress, onInteraction }: YggdrasilModelProps) {
   const mount = useRef<HTMLDivElement>(null);
+  const [requested, setRequested] = useState(manifest.config.export.loadingPolicy !== "on-demand");
+  const [attempt, setAttempt] = useState(0);
+  const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [annotation, setAnnotation] = useState<string | null>(null);
   const [hotspots, setHotspots] = useState<{ id: string; targetNodeId: string }[]>([]);
   const hotspotAction = useRef<(id: string) => void>(() => {});
 
   useEffect(() => {
     const host = mount.current;
-    if (!host) return;
+    if (!host || !requested) return;
+    const abort = new AbortController();
+    const hints: HTMLLinkElement[] = [];
+    setLoadState("loading"); setLoadError(null);
     const config = manifest.config;
     const reduced = config.scene.reducedMotion || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const scene = new Scene();
@@ -200,9 +207,15 @@ export function YggdrasilModel({ manifest, assetBaseUrl, className, onLoad, onEr
       controls.update(); renderer.render(scene, camera); requestAnimationFrame(frame);
     };
     requestAnimationFrame(frame);
-    const modelUrl = new URL(manifest.modelPath, assetBaseUrl ?? document.baseURI).href;
+    const baseUrl = assetBaseUrl ?? document.baseURI;
+    const modelUrl = new URL(manifest.modelPath, baseUrl).href;
     const loader = new GLTFLoader(); loader.setMeshoptDecoder(MeshoptDecoder);
-    loader.load(modelUrl, (gltf) => {
+    const fail = (error: unknown) => {
+      if (!active) return;
+      const issue = error instanceof Error ? error : new Error("Model loading failed");
+      setLoadState("error"); setLoadError(issue.message); onError?.(issue);
+    };
+    const startModel = () => loader.load(modelUrl, (gltf) => {
       if (!active) return;
       root = cloneSkeleton(gltf.scene); scene.add(root);
       parts = indexParts(root);
@@ -244,20 +257,40 @@ export function YggdrasilModel({ manifest, assetBaseUrl, className, onLoad, onEr
         scrollObserver.observe(host);
       }
       setHotspots(config.interactions.filter((item) => item.trigger === "hotspot" && parts.some((part) => part.id === item.targetNodeId)).map(({ id, targetNodeId }) => ({ id, targetNodeId })));
-      onLoad?.();
-    }, (event) => onProgress?.(event.loaded, event.total), (error) => onError?.(error instanceof Error ? error : new Error("Model loading failed")));
+      setLoadState("ready"); onLoad?.();
+    }, (event) => onProgress?.(event.loaded, event.total), fail);
+    const policy = config.export.loadingPolicy;
+    const selected = policy === "full-preload" ? manifest.files : policy === "critical-assets" ? manifest.files.filter((file) => config.export.criticalAssetIds.includes(file.path)) : [];
+    void (async () => {
+      let loaded = 0;
+      const total = selected.reduce((sum, file) => sum + file.byteSize, 0);
+      for (const file of selected) {
+        const url = new URL(file.path, baseUrl).href;
+        const hint = document.createElement("link"); hint.rel = "preload"; hint.as = "fetch"; hint.href = url; hint.crossOrigin = "anonymous"; document.head.append(hint); hints.push(hint);
+        const response = await fetch(url, { signal: abort.signal });
+        if (!response.ok) throw new Error(`Could not preload ${file.path} (${response.status}).`);
+        const bytes = await response.arrayBuffer();
+        if (bytes.byteLength !== file.byteSize) throw new Error(`Preloaded ${file.path} has the wrong size.`);
+        loaded += bytes.byteLength; if (active) onProgress?.(loaded, total);
+      }
+      if (active) startModel();
+    })().catch((error) => { if (!abort.signal.aborted) fail(error); });
     return () => {
       active = false;
+      abort.abort(); hints.forEach((hint) => hint.remove());
       observer.disconnect(); scrollObserver?.disconnect(); controls.dispose();
       renderer.domElement.removeEventListener("click", click); renderer.domElement.removeEventListener("pointermove", hover);
       timelines.forEach(({ tween }) => tween.kill()); mixer?.stopAllAction(); disposeAppearance();
       root?.traverse((object) => { if (object instanceof Mesh) { object.geometry.dispose(); for (const material of Array.isArray(object.material) ? object.material : [object.material]) material.dispose(); } });
       renderer.dispose(); renderer.domElement.remove();
     };
-  }, [manifest, assetBaseUrl, onLoad, onError, onProgress, onInteraction]);
+  }, [manifest, assetBaseUrl, onLoad, onError, onProgress, onInteraction, requested, attempt]);
 
   return <div className={className} style={{ position: "relative", width: "100%", height: "100%", minHeight: 240 }}>
     <div ref={mount} style={{ width: "100%", height: "100%" }} role="img" aria-label="3D model viewer" />
+    {!requested ? <button type="button" style={{ position: "absolute", inset: "auto auto 12px 12px" }} onClick={() => setRequested(true)}>Load model</button> : null}
+    {requested && loadState === "loading" ? <div role="status" style={{ position: "absolute", top: 12, left: 12, background: "#fff", color: "#111", padding: 8 }}>Loading model…</div> : null}
+    {loadState === "error" ? <div role="alert" style={{ position: "absolute", top: 12, left: 12, background: "#fff", color: "#111", padding: 8 }}>{loadError}<button type="button" onClick={() => setAttempt((value) => value + 1)}>Retry loading</button></div> : null}
     {hotspots.length ? <div style={{ position: "absolute", bottom: 12, left: 12 }}>{hotspots.map((hotspot) => <button key={hotspot.id} type="button" onClick={() => hotspotAction.current(hotspot.id)}>Hotspot {hotspot.id.slice(0, 8)}</button>)}</div> : null}
     {annotation ? <div role="status" style={{ position: "absolute", top: 12, left: 12, background: "#fff", color: "#111", padding: 8 }}>{annotation}<button type="button" onClick={() => setAnnotation(null)} aria-label="Close annotation">×</button></div> : null}
   </div>;

@@ -54,6 +54,7 @@ describe("export manifest", () => {
     project.snapshot.interactions = [];
     expect(safePortablePath("../private/model.glb")).toBeNull();
     expect(safePortablePath("C:\\private\\model.glb")).toBeNull();
+    expect(safePortablePath("assets/source/CON.gltf")).toBeNull();
     await expect(buildExportManifest(project, { ...version, relativePath: "../private/model.gltf" }, sourceFiles, storage)).rejects.toThrow();
     project.snapshot.export.criticalAssetIds = ["assets/source/missing.bin"];
     await expect(buildExportManifest(project, version, sourceFiles, storage)).rejects.toThrow(/Critical asset/);

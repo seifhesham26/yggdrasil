@@ -6,6 +6,7 @@ import { buildExportManifest, type ExportManifest, type VersionFile } from "../d
 import type { StoredAssetFile } from "@/features/assets/infrastructure/asset-repository";
 import { buildReactBundle } from "../infrastructure/react-bundle";
 import { buildEmbedBundle } from "../infrastructure/embed-bundle";
+import { buildPackageBundle } from "../infrastructure/package-bundle";
 
 export type ExportStatus = "queued" | "building" | "ready" | "failed";
 export type ExportKind = "manifest" | "react" | "embed" | "package";
@@ -50,11 +51,10 @@ export class ExportService {
     const job = await this.repository.claim(ownerId, jobId);
     if (!job) return null;
     try {
-      if (job.target !== "manifest" && job.target !== "react" && job.target !== "embed") throw new Error("Export target is not yet supported.");
       const { version, files } = await this.repository.sources(job);
       const { manifest, files: resolvedFiles } = await buildExportManifest({ id: job.projectId, name: job.projectName, revision: job.projectRevision,
         currentRevisionId: job.projectRevisionId, assetVersionId: job.assetVersionId, snapshot: job.snapshot }, version, files, this.storage, job.createdAt);
-      const bytes = job.target === "react" ? await buildReactBundle(manifest, resolvedFiles, this.storage) : job.target === "embed" ? await buildEmbedBundle(manifest, resolvedFiles, this.storage) : new TextEncoder().encode(JSON.stringify(manifest, null, 2) + "\n");
+      const bytes = job.target === "react" ? await buildReactBundle(manifest, resolvedFiles, this.storage) : job.target === "embed" ? await buildEmbedBundle(manifest, resolvedFiles, this.storage) : job.target === "package" ? await buildPackageBundle(manifest, resolvedFiles, this.storage) : new TextEncoder().encode(JSON.stringify(manifest, null, 2) + "\n");
       const storageKey = parseStorageKey(`exports/${job.id}/${randomUUID()}/${job.target === "manifest" ? "manifest.json" : `${job.target}.zip`}`);
       await this.storage.put(storageKey, bytes);
       return this.repository.complete(ownerId, jobId, manifest, { jobId, kind: job.target, storageKey, sha256: createHash("sha256").update(bytes).digest("hex"), byteSize: bytes.byteLength, mimeType: job.target === "manifest" ? "application/json" : "application/zip" });

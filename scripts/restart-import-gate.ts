@@ -604,6 +604,41 @@ try {
   if (/sourceStorageKey|postgres(?:ql)?:\/\/|BETTER_AUTH_SECRET|DATABASE_URL|[a-z]:\\/i.test(new TextDecoder().decode(embedFiles["manifest.json"]))) throw new Error("Embed export exposed private manifest state.");
   console.log(`EMBED_EXPORT_AUTH_GATE_PASS: owner downloaded a complete embed bundle with retained model SHA-256 ${versionSha}.`);
 
+  await exportPanel.getByLabel("Loading policy").selectOption("critical-assets");
+  await exportPanel.getByLabel("assets/model.glb").check();
+  await page.getByRole("button", { name: "Save project" }).click();
+  await page.getByText("Saved", { exact: true }).first().waitFor();
+  await exportPanel.getByRole("button", { name: "Download complete package" }).click();
+  await exportPanel.getByRole("link", { name: "Download complete package" }).waitFor();
+  const packageJobs = await (await page.request.get(`/api/projects/${projectId}/exports`)).json() as { jobs: Array<{ id: string; target: string; status: string; manifest: { config: { export: { loadingPolicy: string; criticalAssetIds: string[] } } } | null }> };
+  const packageJob = packageJobs.jobs.find((job) => job.target === "package");
+  if (!packageJob || packageJob.status !== "ready" || packageJob.manifest?.config.export.loadingPolicy !== "critical-assets" || !packageJob.manifest.config.export.criticalAssetIds.includes("assets/model.glb")) throw new Error("Package did not freeze the owner's loading controls.");
+  const packageUrl = `/api/projects/${projectId}/exports/${packageJob.id}/artifact`;
+  const packageResponse = await page.request.get(packageUrl);
+  if (packageResponse.status() !== 200) throw new Error("Owner could not download the complete package.");
+  const packageBytes = new Uint8Array(await packageResponse.body());
+  const packageFiles = unzipSync(packageBytes);
+  if (["README.md", "manifest.json", "dependencies.json", "licenses.json", "attribution.txt", "react/src/YggdrasilModel.tsx", "react/public/assets/model.glb", "embed/viewer.html", "embed/viewer.js", "embed/assets/model.glb"].some((path) => !packageFiles[path])) throw new Error("Downloaded package is incomplete.");
+  if (createHash("sha256").update(packageFiles["react/public/assets/model.glb"]).digest("hex") !== versionSha || createHash("sha256").update(packageFiles["embed/assets/model.glb"]).digest("hex") !== versionSha) throw new Error("Package changed the retained model bytes.");
+  if (/sourceStorageKey|postgres(?:ql)?:\/\/|BETTER_AUTH_SECRET|DATABASE_URL|[a-z]:\\/i.test(new TextDecoder().decode(packageFiles["manifest.json"]))) throw new Error("Package exposed private state.");
+  await page.reload();
+  await page.getByRole("button", { name: "Export step" }).click();
+  await page.getByRole("link", { name: "Download complete package" }).waitFor();
+  const reopenedPackage = await page.request.get(packageUrl);
+  if (reopenedPackage.status() !== 200 || createHash("sha256").update(await reopenedPackage.body()).digest("hex") !== createHash("sha256").update(packageBytes).digest("hex")) throw new Error("Reopened package differs from the downloaded artifact.");
+  const reopenedPanel = page.getByRole("region", { name: "Export controls" });
+  await client.query("update asset_versions set sha256 = $2 where id = $1", [derived.id, "0".repeat(64)]);
+  try {
+    await reopenedPanel.getByRole("button", { name: "Download complete package" }).click();
+    await reopenedPanel.getByText(/failed · SOURCE_UNAVAILABLE/).waitFor();
+    const failedPackage = (await (await page.request.get(`/api/projects/${projectId}/exports`)).json() as typeof packageJobs).jobs.find((job) => job.target === "package" && job.status === "failed");
+    if (!failedPackage || (await page.request.get(`/api/projects/${projectId}/exports/${failedPackage.id}/artifact`)).status() !== 404) throw new Error("Failed package exposed an artifact.");
+  } finally { await client.query("update asset_versions set sha256 = $2 where id = $1", [derived.id, versionSha]); }
+  await reopenedPanel.getByRole("button", { name: "Retry export" }).click();
+  await reopenedPanel.getByRole("link", { name: "Download complete package" }).nth(1).waitFor();
+  if (createHash("sha256").update(await (await page.request.get(fileUrl)).body()).digest("hex") !== sourceHash) throw new Error("Package export changed original source bytes.");
+  console.log(`PACKAGE_EXPORT_AUTH_GATE_PASS: owner controls froze, ZIP downloaded and reopened with retained model SHA-256 ${versionSha}, failed build published no artifact, retry recovered, original source remained ${sourceHash}.`);
+
   await page.emulateMedia({ reducedMotion: "reduce" });
   for (const [name, scale] of [["tiny", 0.00001], ["large", 100000]] as const) {
     await page.goto("/library");

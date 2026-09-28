@@ -22,10 +22,14 @@ export default async function ProjectPage({ params }: { params: Promise<{ projec
   const [version] = await db.select({ storageKey: assetVersions.storageKey }).from(assetVersions).where(and(eq(assetVersions.id, state.project.assetVersionId), eq(assetVersions.assetId, asset.id)));
   if (!version) notFound();
   const retained = asset.retainedFiles?.find((file) => file.storageKey === version.storageKey);
+  const source = asset.files.find((file) => file.storageKey === version.storageKey);
   const model = {
     modelUrl: `/api/assets/${asset.id}/file?key=${encodeURIComponent(version.storageKey)}`,
     primaryRelativePath: retained?.relativePath ?? variantSourcePath(version.storageKey) ?? "model.glb",
     files: asset.files.map(({ relativePath, storageKey }) => ({ relativePath, storageKey })),
+    exportPaths: source
+      ? [`assets/source/${source.relativePath}`, ...asset.files.filter((file) => file.storageKey !== version.storageKey && file.role !== "source").map((file) => `assets/source/${file.relativePath}`)]
+      : [`assets/model.${version.storageKey.endsWith(".gltf") ? "gltf" : "glb"}`, ...asset.files.filter((file) => file.role === "attribution").map((file) => `assets/attribution/${file.relativePath}`)],
   };
   return <ProjectEditor initialState={state} assetName={asset.name} model={model} />;
 }

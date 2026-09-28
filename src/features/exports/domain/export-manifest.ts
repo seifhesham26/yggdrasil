@@ -28,7 +28,7 @@ export type ResolvedExportFile = { path: string; storageKey: StorageKey; sha256:
 export function safePortablePath(path: string): string | null {
   if (!path || path.startsWith("/") || path.startsWith("\\") || /^[a-z]:/i.test(path) || path.includes("\\") || /[\x00-\x1f\x7f:?*"<>|]/.test(path)) return null;
   const parts = path.split("/");
-  if (parts.some((part) => !part || part === "." || part === ".." || part.endsWith(".") || part.endsWith(" "))) return null;
+  if (parts.some((part) => !part || part === "." || part === ".." || part.endsWith(".") || part.endsWith(" ") || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part))) return null;
   return path;
 }
 

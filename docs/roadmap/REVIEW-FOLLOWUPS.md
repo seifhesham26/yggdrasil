@@ -43,10 +43,10 @@ This file turns the coordinator and subagent review findings into executable tas
 
 ## Phase 5 — export
 
-- [ ] Implement a versioned portable export manifest with stable references, pre-publication validation, secret/Neon/local-path scanning, and retryable export failures.
-- [ ] Generate a React target that builds and renders in an independent sample app with animation, reduced-motion behavior, portable assets, declarations, dependencies, attribution, and integration instructions.
-- [ ] Generate a standalone embed target with predictable lifecycle, resize, error, interaction, animation, messaging-safety, keyboard, and reduced-motion behavior.
-- [ ] Package and verify all loading policies with network traces, safe unpacking, no Yggdrasil/Neon/local-path dependency, complete references/docs/attribution, download/reopen, and failure/retry browser tests.
+- [x] Implement a versioned portable export manifest with stable references, pre-publication validation, secret/Neon/local-path scanning, and retryable export failures.
+- [x] Generate a React target that builds and renders in an independent sample app with animation, reduced-motion behavior, portable assets, declarations, dependencies, attribution, and integration instructions.
+- [x] Generate a standalone embed target with predictable lifecycle, resize, error, interaction, animation, messaging-safety, keyboard, and reduced-motion behavior.
+- [x] Package and verify all loading policies with network traces, safe unpacking, no Yggdrasil/Neon/local-path dependency, complete references/docs/attribution, download/reopen, and failure/retry browser tests.
 
 ## Cross-cutting design decision
 
