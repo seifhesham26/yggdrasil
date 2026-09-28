@@ -22,7 +22,7 @@ blob-report/
 # Local assets and generated exports
 data/
 yggdrasil-data/
-exports/
+/exports/
 private-fixtures/
 Mega.Wyvern/
 

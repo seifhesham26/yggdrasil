@@ -546,6 +546,37 @@ try {
   if (createHash("sha256").update(await (await page.request.get(fileUrl)).body()).digest("hex") !== sourceHash) throw new Error("Timeline edits changed original model bytes.");
   console.log(`VISUAL_TIMELINE_RELOAD_GATE_PASS: typed click track and keyframe persisted; scrub differences ${timelineDifference.toFixed(2)} and ${reloadedTimelineDifference.toFixed(2)} after reload; click trigger, reduced motion, and unsafe payload checks passed.`);
 
+  await page.getByRole("button", { name: "Export step" }).click();
+  const exportPanel = page.getByRole("region", { name: "Export controls" });
+  await exportPanel.getByRole("button", { name: "Create export manifest" }).click();
+  await exportPanel.getByRole("link", { name: "Download manifest" }).waitFor();
+  const exportJobsResponse = await page.request.get(`/api/projects/${projectId}/exports`);
+  if (exportJobsResponse.status() !== 200) throw new Error("Owner could not list export jobs.");
+  const exportJobs = await exportJobsResponse.json() as { jobs: Array<{ id: string; status: string; projectRevision: number }> };
+  const [readyExport] = exportJobs.jobs;
+  if (readyExport.status !== "ready") throw new Error("Validated export was not marked ready.");
+  const manifestResponse = await page.request.get(`/api/projects/${projectId}/exports/${readyExport.id}/manifest`);
+  if (manifestResponse.status() !== 200) throw new Error("Owner could not download the export manifest.");
+  const manifestText = await manifestResponse.text();
+  const manifest = JSON.parse(manifestText) as { projectRevision: number; modelPath: string; files: Array<{ path: string }>; warnings: string[] };
+  if (manifest.projectRevision !== readyExport.projectRevision || manifest.modelPath !== "assets/model.glb" || !manifest.files.some((file) => file.path === manifest.modelPath)) throw new Error("Export manifest did not freeze the project revision and retained model.");
+  if (/sourceStorageKey|postgres(?:ql)?:\/\/|BETTER_AUTH_SECRET|DATABASE_URL|[a-z]:\\/i.test(manifestText)) throw new Error("Export manifest exposed private or machine-local state.");
+  const [{ sha256: versionSha }] = (await client.query<{ sha256: string }>("select sha256 from asset_versions where id = $1", [derived.id])).rows;
+  await client.query("update asset_versions set sha256 = $2 where id = $1", [derived.id, "0".repeat(64)]);
+  try {
+    await exportPanel.getByRole("button", { name: "Create export manifest" }).click();
+    await exportPanel.getByText(/failed · SOURCE_UNAVAILABLE/).waitFor();
+    const failedJobs = await (await page.request.get(`/api/projects/${projectId}/exports`)).json() as typeof exportJobs;
+    const [failedExport] = failedJobs.jobs;
+    if (failedExport.status !== "failed" || (await page.request.get(`/api/projects/${projectId}/exports/${failedExport.id}/manifest`)).status() !== 404) throw new Error("Failed export published a manifest artifact.");
+  } finally { await client.query("update asset_versions set sha256 = $2 where id = $1", [derived.id, versionSha]); }
+  await exportPanel.getByRole("button", { name: "Retry export" }).click();
+  await exportPanel.getByRole("link", { name: "Download manifest" }).nth(1).waitFor();
+  const retriedJobs = await (await page.request.get(`/api/projects/${projectId}/exports`)).json() as typeof exportJobs;
+  if (retriedJobs.jobs[0]?.status !== "ready" || retriedJobs.jobs[0].id === readyExport.id) throw new Error("Failed export did not become ready on retry.");
+  if (createHash("sha256").update(await (await page.request.get(fileUrl)).body()).digest("hex") !== sourceHash) throw new Error("Export changed original source bytes.");
+  console.log(`EXPORT_MANIFEST_RETRY_GATE_PASS: owner downloaded portable revision ${readyExport.projectRevision}, missing source metadata failed without artifact, retry succeeded, and original source SHA-256 remained ${sourceHash}.`);
+
   await page.emulateMedia({ reducedMotion: "reduce" });
   for (const [name, scale] of [["tiny", 0.00001], ["large", 100000]] as const) {
     await page.goto("/library");

@@ -64,6 +64,6 @@
 
 ## Phase 5: Export
 
-- [ ] Validate and freeze a portable manifest with owner-scoped asset resolution and retryable failures.
+- [x] Validate and freeze a portable manifest with owner-scoped asset resolution and retryable failures. See Task 5.1 evidence in `docs/roadmap/phase-5-export/01-manifest.md`.
 - [ ] Build independent React and embed consumers and test behavior against the editor preview.
 - [ ] Package all assets, attribution, docs, and loading policies; verify independent unpack/run and network order.

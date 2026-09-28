@@ -393,6 +393,12 @@ a { color: inherit; text-decoration: none; }
 .visual-timeline-editor input, .visual-timeline-editor select { min-width: 0; width: 100%; }
 .timeline-keyframe { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; width: 100%; }
 .timeline-keyframe label { flex: 1 1 90px; }
+.export-controls { display: grid; gap: 12px; }
+.export-controls p { margin: 0; }
+.export-controls button, .export-controls a { width: fit-content; padding: 8px 10px; border: 1px solid #6a918d; background: #244b50; color: #eaf3f0; cursor: pointer; text-decoration: none; }
+.export-controls button:disabled { opacity: .5; }
+.export-controls ul { margin: 0; padding: 0; list-style: none; }
+.export-controls li { display: grid; gap: 7px; padding: 12px 0; border-top: 1px solid #36515a; }
 .interaction-warnings { padding: 8px 12px; border: 1px solid #b18858; background: #3c3327; }
 .viewer-interactions { position: absolute; z-index: 3; left: 12px; bottom: 14px; display: flex; flex-wrap: wrap; gap: 8px; max-width: calc(100% - 24px); }
 .viewer-interactions button { padding: 8px 10px; border: 1px solid #a9d8d0; border-radius: 4px; background: #16353bdc; color: #f5fffc; cursor: pointer; }
