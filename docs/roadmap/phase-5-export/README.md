@@ -5,7 +5,7 @@
 Goal: take saved projects into Valkyrie, Einherji, and other websites without embedding Yggdrasil's database credentials or local-only paths.
 
 - [x] [5.1 — Export representation and validation](01-manifest.md)
-- [ ] [5.2 — React component target](02-react.md)
+- [x] [5.2 — React component target](02-react.md)
 - [ ] [5.3 — Embed viewer target](03-embed.md)
 - [ ] [5.4 — Downloadable package and loading policies](04-package-prefetch.md)
 

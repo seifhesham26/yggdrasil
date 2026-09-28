@@ -25,9 +25,9 @@ export function createExportHandler(deps: { getSession: (headers: Headers) => Pr
       const access = await owner(request, projectId); if (access.response) return access.response;
       let input: unknown;
       try { input = await request.json(); } catch { return Response.json({ code: "INVALID_JSON" }, { status: 400 }); }
-      if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).length !== 1 || (input as { target?: unknown }).target !== "manifest") return Response.json({ code: "UNSUPPORTED_EXPORT_TARGET" }, { status: 400 });
+      if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).length !== 1 || !["manifest", "react"].includes(String((input as { target?: unknown }).target))) return Response.json({ code: "UNSUPPORTED_EXPORT_TARGET" }, { status: 400 });
       try {
-        const job = await deps.service.create(access.ownerId!, projectId);
+        const job = await deps.service.create(access.ownerId!, projectId, (input as { target: "manifest" | "react" }).target);
         return job ? Response.json(publicExportJob(job), { status: 201, headers: { "cache-control": "no-store" } }) : Response.json({ code: "PROJECT_NOT_FOUND" }, { status: 404 });
       } catch { return Response.json({ code: "EXPORT_UNAVAILABLE" }, { status: 503 }); }
     },
@@ -40,17 +40,23 @@ export function createExportHandler(deps: { getSession: (headers: Headers) => Pr
         return job ? Response.json(publicExportJob(job), { headers: { "cache-control": "no-store" } }) : Response.json({ code: "EXPORT_NOT_RETRYABLE" }, { status: 409 });
       } catch { return Response.json({ code: "EXPORT_UNAVAILABLE" }, { status: 503 }); }
     },
-    async MANIFEST(request: Request, projectId: string, jobId: string): Promise<Response> {
+    async ARTIFACT(request: Request, projectId: string, jobId: string): Promise<Response> {
       const access = await owner(request, projectId); if (access.response) return access.response;
       const job = await deps.service.get(access.ownerId!, jobId);
       if (!job || job.projectId !== projectId || job.status !== "ready") return Response.json({ code: "EXPORT_NOT_FOUND" }, { status: 404 });
       try {
         const artifact = await deps.service.artifact(access.ownerId!, jobId);
-        if (!artifact) throw new Error("Manifest artifact is missing.");
+        if (!artifact) throw new Error("Export artifact is missing.");
         const bytes = await deps.storage.read(artifact.storageKey);
-        if (bytes.byteLength !== artifact.byteSize || createHash("sha256").update(bytes).digest("hex") !== artifact.sha256) throw new Error("Manifest artifact changed.");
-        return new Response(Buffer.from(bytes), { headers: { "content-type": "application/json; charset=utf-8", "content-disposition": `attachment; filename="yggdrasil-${jobId}-manifest.json"`, "cache-control": "private, no-store" } });
+        if (bytes.byteLength !== artifact.byteSize || createHash("sha256").update(bytes).digest("hex") !== artifact.sha256) throw new Error("Export artifact changed.");
+        return new Response(Buffer.from(bytes), { headers: { "content-type": artifact.mimeType, "content-disposition": `attachment; filename="yggdrasil-${jobId}-${job.target}.${job.target === "manifest" ? "json" : "zip"}"`, "cache-control": "private, no-store" } });
       } catch { return Response.json({ code: "EXPORT_ARTIFACT_UNAVAILABLE" }, { status: 503 }); }
+    },
+    async MANIFEST(request: Request, projectId: string, jobId: string): Promise<Response> {
+      const response = await this.ARTIFACT(request, projectId, jobId);
+      if (response.status !== 200) return response;
+      if (response.headers.get("content-type") !== "application/json") return Response.json({ code: "EXPORT_NOT_FOUND" }, { status: 404 });
+      return response;
     },
   };
 }

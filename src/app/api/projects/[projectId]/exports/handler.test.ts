@@ -6,6 +6,7 @@ import { DrizzleProjectRepository } from "@/features/projects/infrastructure/pro
 import { ExportService } from "@/features/exports/application/export-service";
 import { DrizzleExportRepository } from "@/features/exports/infrastructure/export-repository";
 import { createExportHandler } from "./handler";
+import { unzipSync } from "fflate";
 
 vi.mock("@/db/client", async () => ({ db: (await import("@/test/optimization-database")).testDb }));
 beforeAll(migrateTestDatabase, 30_000);
@@ -25,7 +26,7 @@ describe("export API", () => {
     const foreign = createExportHandler({ getSession: async () => ({ user: { id: "other-owner" } }), history, service, storage: fixture.storage });
     expect((await foreign.POST(request({ target: "manifest" }), project.project.id)).status).toBe(404);
     const handler = createExportHandler({ getSession: async () => ({ user: { id: ownerId } }), history, service, storage: fixture.storage });
-    expect((await handler.POST(request({ target: "react" }), project.project.id)).status).toBe(400);
+    expect((await handler.POST(request({ target: "embed" }), project.project.id)).status).toBe(400);
     const created = await handler.POST(request({ target: "manifest" }), project.project.id);
     expect(created.status).toBe(201);
     const job = await created.json() as { id: string; status: string };
@@ -39,5 +40,17 @@ describe("export API", () => {
     expect((await handler.GET(new Request("http://localhost"), project.project.id)).status).toBe(200);
     expect((await handler.RETRY(new Request("http://localhost", { method: "POST" }), project.project.id, job.id)).status).toBe(409);
     expect((await foreign.MANIFEST(new Request("http://localhost"), project.project.id, job.id)).status).toBe(404);
+    const react = await handler.POST(request({ target: "react" }), project.project.id);
+    expect(react.status).toBe(201);
+    const reactJob = await react.json() as { id: string; status: string };
+    expect(reactJob.status).toBe("ready");
+    const bundle = await handler.ARTIFACT(new Request("http://localhost"), project.project.id, reactJob.id);
+    expect(bundle.status).toBe(200);
+    expect(bundle.headers.get("content-type")).toBe("application/zip");
+    const entries = unzipSync(new Uint8Array(await bundle.arrayBuffer()));
+    expect(Object.keys(entries)).toContain("src/YggdrasilModel.tsx");
+    expect(Object.keys(entries)).toContain(`public/assets/source/${fixture.files[0].relativePath}`);
+    expect(JSON.stringify(entries)).not.toContain("DATABASE_URL");
+    expect((await foreign.ARTIFACT(new Request("http://localhost"), project.project.id, reactJob.id)).status).toBe(404);
   });
 });

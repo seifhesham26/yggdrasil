@@ -74,7 +74,7 @@ export class DrizzleExportRepository implements ExportRepository {
 
   async artifact(ownerId: string, jobId: string): Promise<ExportArtifact | null> {
     const [row] = await db.select({ artifact: exportArtifacts }).from(exportArtifacts).innerJoin(exportJobs, eq(exportJobs.id, exportArtifacts.jobId))
-      .where(and(eq(exportJobs.id, jobId), eq(exportJobs.ownerId, ownerId), eq(exportJobs.status, "ready"), eq(exportArtifacts.kind, "manifest")));
+      .where(and(eq(exportJobs.id, jobId), eq(exportJobs.ownerId, ownerId), eq(exportJobs.status, "ready"), eq(exportArtifacts.kind, exportJobs.target)));
     return row ? { ...row.artifact, storageKey: parseStorageKey(row.artifact.storageKey) } : null;
   }
 }

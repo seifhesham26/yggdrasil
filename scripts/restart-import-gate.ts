@@ -9,6 +9,7 @@ import { chromium } from "@playwright/test";
 import { Client } from "pg";
 import { createGltfFixture } from "../src/test/fixtures/create-gltf-fixture";
 import sharp from "sharp";
+import { unzipSync } from "fflate";
 
 if (process.platform !== "win32") throw new Error("This restart gate currently requires Windows taskkill for process-tree shutdown.");
 if (existsSync(".env")) process.loadEnvFile(".env");
@@ -576,6 +577,19 @@ try {
   if (retriedJobs.jobs[0]?.status !== "ready" || retriedJobs.jobs[0].id === readyExport.id) throw new Error("Failed export did not become ready on retry.");
   if (createHash("sha256").update(await (await page.request.get(fileUrl)).body()).digest("hex") !== sourceHash) throw new Error("Export changed original source bytes.");
   console.log(`EXPORT_MANIFEST_RETRY_GATE_PASS: owner downloaded portable revision ${readyExport.projectRevision}, missing source metadata failed without artifact, retry succeeded, and original source SHA-256 remained ${sourceHash}.`);
+
+  await exportPanel.getByRole("button", { name: "Export React component" }).click();
+  await exportPanel.getByRole("link", { name: "Download React package" }).waitFor();
+  const reactJobs = await (await page.request.get(`/api/projects/${projectId}/exports`)).json() as { jobs: Array<{ id: string; target: string; status: string }> };
+  const reactJob = reactJobs.jobs.find((job) => job.target === "react");
+  if (!reactJob || reactJob.status !== "ready") throw new Error("React export did not become ready.");
+  const reactResponse = await page.request.get(`/api/projects/${projectId}/exports/${reactJob.id}/artifact`);
+  if (reactResponse.status() !== 200) throw new Error("Owner could not download the React bundle.");
+  const reactFiles = unzipSync(new Uint8Array(await reactResponse.body()));
+  if (!reactFiles["src/YggdrasilModel.tsx"] || !reactFiles["src/manifest.json"] || !reactFiles["public/assets/model.glb"]) throw new Error("React export is missing its runtime, manifest, or retained model.");
+  if (createHash("sha256").update(reactFiles["public/assets/model.glb"]).digest("hex") !== versionSha) throw new Error("React export changed the retained model bytes.");
+  if (/sourceStorageKey|postgres(?:ql)?:\/\/|BETTER_AUTH_SECRET|DATABASE_URL|[a-z]:\\/i.test(new TextDecoder().decode(reactFiles["src/manifest.json"]))) throw new Error("React export exposed private manifest state.");
+  console.log(`REACT_EXPORT_AUTH_GATE_PASS: owner downloaded a complete React bundle with retained model SHA-256 ${versionSha}.`);
 
   await page.emulateMedia({ reducedMotion: "reduce" });
   for (const [name, scale] of [["tiny", 0.00001], ["large", 100000]] as const) {
