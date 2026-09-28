@@ -38,11 +38,12 @@ export function ExportControls({ projectId, dirty }: { projectId: string; dirty:
     {dirty ? <p role="status">Save the project before exporting.</p> : null}
     <button type="button" disabled={dirty || busy} onClick={() => void action(endpoint, { target: "manifest" })}>Create export manifest</button>
     <button type="button" disabled={dirty || busy} onClick={() => void action(endpoint, { target: "react" })}>Export React component</button>
+    <button type="button" disabled={dirty || busy} onClick={() => void action(endpoint, { target: "embed" })}>Export embed viewer</button>
     <button type="button" disabled={busy} onClick={() => void refresh().catch((issue) => setError(issue instanceof Error ? issue.message : "Could not load exports."))}>Refresh exports</button>
     {error ? <p role="alert">{error}</p> : null}
     <ul aria-label="Export jobs">{jobs.map((job) => <li key={job.id}>
       <strong>Revision {job.projectRevision} · {job.target}</strong><span>{job.status}{job.errorCode ? ` · ${job.errorCode}` : ""}</span>
-      {job.status === "ready" ? <a href={`${endpoint}/${job.id}/${job.target === "manifest" ? "manifest" : "artifact"}`}>Download {job.target === "manifest" ? "manifest" : "React package"}</a> : null}
+      {job.status === "ready" ? <a href={`${endpoint}/${job.id}/${job.target === "manifest" ? "manifest" : "artifact"}`}>Download {job.target === "manifest" ? "manifest" : job.target === "react" ? "React package" : "embed package"}</a> : null}
       {job.status === "failed" ? <button type="button" disabled={busy} onClick={() => void action(`${endpoint}/${job.id}/retry`)}>Retry export</button> : null}
       {job.manifest?.warnings.map((warning) => <p key={warning} role="status">{warning}</p>)}
     </li>)}</ul>

@@ -6,7 +6,7 @@ Goal: take saved projects into Valkyrie, Einherji, and other websites without em
 
 - [x] [5.1 — Export representation and validation](01-manifest.md)
 - [x] [5.2 — React component target](02-react.md)
-- [ ] [5.3 — Embed viewer target](03-embed.md)
+- [x] [5.3 — Embed viewer target](03-embed.md)
 - [ ] [5.4 — Downloadable package and loading policies](04-package-prefetch.md)
 
 **Phase exit:** A saved project exports as a working React component, embeddable viewer/configuration, and complete downloadable bundle. The user can choose `on-demand`, `metadata-first`, `critical-assets`, or `full-preload` loading and verify behavior in an independent sample site.

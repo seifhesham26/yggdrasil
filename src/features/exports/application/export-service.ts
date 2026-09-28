@@ -5,6 +5,7 @@ import { parseStorageKey, type StorageKey } from "@/lib/storage/storage-key";
 import { buildExportManifest, type ExportManifest, type VersionFile } from "../domain/export-manifest";
 import type { StoredAssetFile } from "@/features/assets/infrastructure/asset-repository";
 import { buildReactBundle } from "../infrastructure/react-bundle";
+import { buildEmbedBundle } from "../infrastructure/embed-bundle";
 
 export type ExportStatus = "queued" | "building" | "ready" | "failed";
 export type ExportKind = "manifest" | "react" | "embed" | "package";
@@ -49,14 +50,14 @@ export class ExportService {
     const job = await this.repository.claim(ownerId, jobId);
     if (!job) return null;
     try {
-      if (job.target !== "manifest" && job.target !== "react") throw new Error("Export target is not yet supported.");
+      if (job.target !== "manifest" && job.target !== "react" && job.target !== "embed") throw new Error("Export target is not yet supported.");
       const { version, files } = await this.repository.sources(job);
       const { manifest, files: resolvedFiles } = await buildExportManifest({ id: job.projectId, name: job.projectName, revision: job.projectRevision,
         currentRevisionId: job.projectRevisionId, assetVersionId: job.assetVersionId, snapshot: job.snapshot }, version, files, this.storage, job.createdAt);
-      const bytes = job.target === "react" ? await buildReactBundle(manifest, resolvedFiles, this.storage) : new TextEncoder().encode(JSON.stringify(manifest, null, 2) + "\n");
-      const storageKey = parseStorageKey(`exports/${job.id}/${randomUUID()}/${job.target === "react" ? "react.zip" : "manifest.json"}`);
+      const bytes = job.target === "react" ? await buildReactBundle(manifest, resolvedFiles, this.storage) : job.target === "embed" ? await buildEmbedBundle(manifest, resolvedFiles, this.storage) : new TextEncoder().encode(JSON.stringify(manifest, null, 2) + "\n");
+      const storageKey = parseStorageKey(`exports/${job.id}/${randomUUID()}/${job.target === "manifest" ? "manifest.json" : `${job.target}.zip`}`);
       await this.storage.put(storageKey, bytes);
-      return this.repository.complete(ownerId, jobId, manifest, { jobId, kind: job.target, storageKey, sha256: createHash("sha256").update(bytes).digest("hex"), byteSize: bytes.byteLength, mimeType: job.target === "react" ? "application/zip" : "application/json" });
+      return this.repository.complete(ownerId, jobId, manifest, { jobId, kind: job.target, storageKey, sha256: createHash("sha256").update(bytes).digest("hex"), byteSize: bytes.byteLength, mimeType: job.target === "manifest" ? "application/json" : "application/zip" });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Export build failed.";
       const code = /missing|changed|ENOENT/i.test(message) ? "SOURCE_UNAVAILABLE" : /unsupported|invalid|unsafe|secret|Critical asset|exceeds|mismatch/i.test(message) ? "INVALID_EXPORT" : "EXPORT_BUILD_FAILED";

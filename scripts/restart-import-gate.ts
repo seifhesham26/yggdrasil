@@ -591,6 +591,19 @@ try {
   if (/sourceStorageKey|postgres(?:ql)?:\/\/|BETTER_AUTH_SECRET|DATABASE_URL|[a-z]:\\/i.test(new TextDecoder().decode(reactFiles["src/manifest.json"]))) throw new Error("React export exposed private manifest state.");
   console.log(`REACT_EXPORT_AUTH_GATE_PASS: owner downloaded a complete React bundle with retained model SHA-256 ${versionSha}.`);
 
+  await exportPanel.getByRole("button", { name: "Export embed viewer" }).click();
+  await exportPanel.getByRole("link", { name: "Download embed package" }).waitFor();
+  const embedJobs = await (await page.request.get(`/api/projects/${projectId}/exports`)).json() as { jobs: Array<{ id: string; target: string; status: string }> };
+  const embedJob = embedJobs.jobs.find((job) => job.target === "embed");
+  if (!embedJob || embedJob.status !== "ready") throw new Error("Embed export did not become ready.");
+  const embedResponse = await page.request.get(`/api/projects/${projectId}/exports/${embedJob.id}/artifact`);
+  if (embedResponse.status() !== 200) throw new Error("Owner could not download the embed bundle.");
+  const embedFiles = unzipSync(new Uint8Array(await embedResponse.body()));
+  if (!embedFiles["viewer.js"] || !embedFiles["viewer.html"] || !embedFiles["host.html"] || !embedFiles["assets/model.glb"]) throw new Error("Embed export is missing its runtime, sample, or retained model.");
+  if (createHash("sha256").update(embedFiles["assets/model.glb"]).digest("hex") !== versionSha) throw new Error("Embed export changed the retained model bytes.");
+  if (/sourceStorageKey|postgres(?:ql)?:\/\/|BETTER_AUTH_SECRET|DATABASE_URL|[a-z]:\\/i.test(new TextDecoder().decode(embedFiles["manifest.json"]))) throw new Error("Embed export exposed private manifest state.");
+  console.log(`EMBED_EXPORT_AUTH_GATE_PASS: owner downloaded a complete embed bundle with retained model SHA-256 ${versionSha}.`);
+
   await page.emulateMedia({ reducedMotion: "reduce" });
   for (const [name, scale] of [["tiny", 0.00001], ["large", 100000]] as const) {
     await page.goto("/library");

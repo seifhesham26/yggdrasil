@@ -202,6 +202,9 @@ importers:
       drizzle-orm:
         specifier: ^0.45.3
         version: 0.45.3(@electric-sql/pglite@0.5.8)(@neondatabase/serverless@1.1.0)(@types/pg@8.23.1)(kysely@0.29.6)(pg@8.23.0)
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
       fflate:
         specifier: ^0.8.3
         version: 0.8.3

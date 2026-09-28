@@ -26,7 +26,7 @@ describe("export API", () => {
     const foreign = createExportHandler({ getSession: async () => ({ user: { id: "other-owner" } }), history, service, storage: fixture.storage });
     expect((await foreign.POST(request({ target: "manifest" }), project.project.id)).status).toBe(404);
     const handler = createExportHandler({ getSession: async () => ({ user: { id: ownerId } }), history, service, storage: fixture.storage });
-    expect((await handler.POST(request({ target: "embed" }), project.project.id)).status).toBe(400);
+    expect((await handler.POST(request({ target: "unknown" }), project.project.id)).status).toBe(400);
     const created = await handler.POST(request({ target: "manifest" }), project.project.id);
     expect(created.status).toBe(201);
     const job = await created.json() as { id: string; status: string };
@@ -52,5 +52,16 @@ describe("export API", () => {
     expect(Object.keys(entries)).toContain(`public/assets/source/${fixture.files[0].relativePath}`);
     expect(JSON.stringify(entries)).not.toContain("DATABASE_URL");
     expect((await foreign.ARTIFACT(new Request("http://localhost"), project.project.id, reactJob.id)).status).toBe(404);
+    const embed = await handler.POST(request({ target: "embed" }), project.project.id);
+    expect(embed.status).toBe(201);
+    const embedJob = await embed.json() as { id: string; status: string };
+    expect(embedJob.status).toBe("ready");
+    const embedResponse = await handler.ARTIFACT(new Request("http://localhost"), project.project.id, embedJob.id);
+    expect(embedResponse.status).toBe(200);
+    const embedFiles = unzipSync(new Uint8Array(await embedResponse.arrayBuffer()));
+    expect(Object.keys(embedFiles)).toContain("viewer.js");
+    expect(Object.keys(embedFiles)).toContain("viewer.html");
+    expect(Object.keys(embedFiles)).toContain(`assets/source/${fixture.files[0].relativePath}`);
+    expect((await foreign.ARTIFACT(new Request("http://localhost"), project.project.id, embedJob.id)).status).toBe(404);
   });
 });

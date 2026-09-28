@@ -9,7 +9,18 @@ const encoder = new TextEncoder();
 const source = (path: string) => readFile(join(process.cwd(), "src", "features", "exports", "runtime", path), "utf8");
 const projectState = () => readFile(join(process.cwd(), "src", "features", "projects", "domain", "project-state.ts"), "utf8");
 
-export async function buildReactBundle(manifest: ExportManifest, files: ResolvedExportFile[], storage: Pick<AssetStorage, "read">): Promise<Uint8Array> {
+export async function assetEntries(files: ResolvedExportFile[], storage: Pick<AssetStorage, "read">, prefix: string): Promise<Record<string, Uint8Array>> {
+  const entries: Record<string, Uint8Array> = {};
+  for (const file of files) {
+    if (!safePortablePath(file.path)) throw new Error("Unsafe output path.");
+    const bytes = await storage.read(file.storageKey);
+    if (bytes.byteLength !== file.byteSize || createHash("sha256").update(bytes).digest("hex") !== file.sha256) throw new Error(`Export source ${file.path} is missing or changed.`);
+    entries[`${prefix}${file.path}`] = bytes;
+  }
+  return entries;
+}
+
+export async function reactBundleEntries(manifest: ExportManifest, files: ResolvedExportFile[], storage: Pick<AssetStorage, "read">): Promise<Record<string, Uint8Array>> {
   const packageJson = {
     name: "yggdrasil-export", version: "1.0.0", private: true, type: "module",
     scripts: { dev: "vite --host 127.0.0.1", build: "tsc --noEmit && vite build" },
@@ -27,13 +38,12 @@ export async function buildReactBundle(manifest: ExportManifest, files: Resolved
     "src/YggdrasilModel.tsx": encoder.encode((await source("YggdrasilModel.tsx")).replace('from "@/features/projects/domain/project-state"', 'from "./project-state"')),
     "src/main.tsx": encoder.encode('import { createRoot } from "react-dom/client";\nimport { YggdrasilModel, type YggdrasilConfig } from "./YggdrasilModel";\nimport manifest from "./manifest.json";\nconst root = document.getElementById("root")!;\ncreateRoot(root).render(<main style={{ height: "100vh", margin: 0 }}><YggdrasilModel manifest={manifest as unknown as YggdrasilConfig} assetBaseUrl={window.location.origin + "/"} onLoad={() => root.setAttribute("data-loaded", "true")} onError={(error) => root.setAttribute("data-error", error.message)} /></main>);\n'),
   };
-  for (const file of files) {
-    if (!safePortablePath(file.path)) throw new Error("Unsafe output path.");
-    const bytes = await storage.read(file.storageKey);
-    if (bytes.byteLength !== file.byteSize || createHash("sha256").update(bytes).digest("hex") !== file.sha256) throw new Error(`Export source ${file.path} is missing or changed.`);
-    entries[`public/${file.path}`] = bytes;
-  }
+  Object.assign(entries, await assetEntries(files, storage, "public/"));
   for (const path of Object.keys(entries)) if (!safePortablePath(path)) throw new Error("Unsafe bundle path.");
+  return entries;
+}
+
+export async function buildReactBundle(manifest: ExportManifest, files: ResolvedExportFile[], storage: Pick<AssetStorage, "read">): Promise<Uint8Array> {
   // ponytail: In-memory ZIP is bounded by the local export size; switch to streaming when multi-gigabyte exports are required.
-  return zipSync(entries, { level: 6 });
+  return zipSync(await reactBundleEntries(manifest, files, storage), { level: 6 });
 }

@@ -25,9 +25,9 @@ export function createExportHandler(deps: { getSession: (headers: Headers) => Pr
       const access = await owner(request, projectId); if (access.response) return access.response;
       let input: unknown;
       try { input = await request.json(); } catch { return Response.json({ code: "INVALID_JSON" }, { status: 400 }); }
-      if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).length !== 1 || !["manifest", "react"].includes(String((input as { target?: unknown }).target))) return Response.json({ code: "UNSUPPORTED_EXPORT_TARGET" }, { status: 400 });
+      if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).length !== 1 || !["manifest", "react", "embed"].includes(String((input as { target?: unknown }).target))) return Response.json({ code: "UNSUPPORTED_EXPORT_TARGET" }, { status: 400 });
       try {
-        const job = await deps.service.create(access.ownerId!, projectId, (input as { target: "manifest" | "react" }).target);
+        const job = await deps.service.create(access.ownerId!, projectId, (input as { target: "manifest" | "react" | "embed" }).target);
         return job ? Response.json(publicExportJob(job), { status: 201, headers: { "cache-control": "no-store" } }) : Response.json({ code: "PROJECT_NOT_FOUND" }, { status: 404 });
       } catch { return Response.json({ code: "EXPORT_UNAVAILABLE" }, { status: 503 }); }
     },
