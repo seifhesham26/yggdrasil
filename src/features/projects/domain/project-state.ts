@@ -62,9 +62,33 @@ const ClipSequence = z.array(SequenceSegment).max(200).superRefine((items, conte
   });
 });
 
+const TimelineProperty = z.enum(["position.x", "position.y", "position.z", "rotation.x", "rotation.y", "rotation.z", "scale.x", "scale.y", "scale.z", "opacity", "roughness", "metalness", "fov", "intensity", "influence"]);
+const TimelineTrack = z.object({
+  id: z.string().uuid(), target: z.enum(["part", "material", "camera", "light", "morph"]), targetId: z.string().min(1).max(240),
+  property: TimelineProperty, keyframes: z.array(z.object({ at: z.number().min(0).max(3600).finite(), value: z.number().min(-100000).max(100000).finite() }).strict()).min(2).max(100),
+}).strict().superRefine((track, context) => {
+  const allowed: Record<typeof track.target, string[]> = {
+    part: ["position.x", "position.y", "position.z", "rotation.x", "rotation.y", "rotation.z", "scale.x", "scale.y", "scale.z"],
+    material: ["opacity", "roughness", "metalness"], camera: ["position.x", "position.y", "position.z", "fov"],
+    light: ["position.x", "position.y", "position.z", "intensity"], morph: ["influence"],
+  };
+  if (!allowed[track.target].includes(track.property)) context.addIssue({ code: "custom", path: ["property"], message: "Property is not supported for this target." });
+  if (track.keyframes[0]?.at !== 0 || track.keyframes.some((keyframe, index) => index > 0 && keyframe.at <= track.keyframes[index - 1].at)) context.addIssue({ code: "custom", path: ["keyframes"], message: "Keyframes must start at zero and have strictly increasing times." });
+  if (["opacity", "roughness", "metalness", "influence"].includes(track.property) && track.keyframes.some((keyframe) => keyframe.value < 0 || keyframe.value > 1)) context.addIssue({ code: "custom", path: ["keyframes"], message: "Material and morph values must be between zero and one." });
+  if (track.property === "fov" && track.keyframes.some((keyframe) => keyframe.value < 1 || keyframe.value > 170)) context.addIssue({ code: "custom", path: ["keyframes"], message: "Camera field of view must be between 1 and 170." });
+});
+const VisualTimeline = z.object({
+  id: z.string().uuid(), name: z.string().min(1).max(120), enabled: z.boolean(), durationSeconds: z.number().positive().max(3600).finite(),
+  trigger: z.object({ type: z.enum(["start", "scroll", "click", "hover", "model-loaded", "clip-start", "clip-end"]), targetId: z.string().max(240).nullable() }).strict(),
+  tracks: z.array(TimelineTrack).max(100),
+}).strict().superRefine((timeline, context) => {
+  if (["click", "hover", "clip-start", "clip-end"].includes(timeline.trigger.type) && !timeline.trigger.targetId) context.addIssue({ code: "custom", path: ["trigger", "targetId"], message: "This trigger requires a target." });
+  if (timeline.tracks.some((track) => track.keyframes.at(-1)!.at > timeline.durationSeconds)) context.addIssue({ code: "custom", path: ["tracks"], message: "Keyframe exceeds timeline duration." });
+});
+
 export const ProjectSnapshotSchema = z.object({
   schemaVersion: z.literal(1), appearance: z.object({ nodes: z.record(z.string(), AppearanceOverride) }).strict(), scene: SceneSettings,
-  interactions: z.array(Interaction).max(200), animation: z.object({ embeddedClips: z.array(EmbeddedClip).max(200), importedClips: z.array(ImportedClip).max(200), sequence: ClipSequence, sequenceLoop: z.boolean(), clips: z.array(z.record(z.string(), z.unknown())).max(200), timelines: z.array(z.record(z.string(), z.unknown())).max(50) }).strict(),
+  interactions: z.array(Interaction).max(200), animation: z.object({ embeddedClips: z.array(EmbeddedClip).max(200), importedClips: z.array(ImportedClip).max(200), sequence: ClipSequence, sequenceLoop: z.boolean(), clips: z.array(z.record(z.string(), z.unknown())).max(200), timelines: z.array(VisualTimeline).max(50) }).strict(),
   export: z.object({ loadingPolicy: z.enum(["on-demand", "metadata-first", "critical-assets", "full-preload"]), criticalAssetIds: z.array(z.string()).max(500) }).strict(),
 }).strict();
 export type ProjectSnapshot = z.infer<typeof ProjectSnapshotSchema>;

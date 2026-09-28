@@ -11,6 +11,7 @@ import type { PartSummary } from "@/features/projects/ui/scene-parts";
 import { PerspectiveCamera, type Camera, type WebGLRenderer } from "three";
 import { matchingInteractions } from "@/features/projects/ui/interaction-runtime";
 import type { AnimationPreview, ClipSource } from "./animation-clips";
+import type { VisualTimeline } from "./visual-timeline";
 
 export type ViewerFile = { relativePath: string; storageKey: string };
 export type ProjectPresentation = {
@@ -22,6 +23,9 @@ export type ProjectPresentation = {
   onClips?: (clips: ClipSource[]) => void;
   onAnimationProgress?: (progress: number, finished: boolean) => void;
   onSequenceWarnings?: (warnings: string[]) => void;
+  timelinePreview?: { timeline: VisualTimeline; progress: number; playing: boolean; restartToken: number } | null;
+  onTimelineProgress?: (progress: number, finished: boolean) => void;
+  onTimelineWarnings?: (warnings: string[]) => void;
   previewInteractions?: boolean;
 };
 
@@ -91,13 +95,13 @@ export function ModelCanvas({ modelUrl, primaryRelativePath, files, presentation
           <Canvas aria-label="3D model preview" camera={{ position: sceneSettings?.camera.position ?? [4, 3, 6], fov: sceneSettings?.camera.fov ?? 42, near: 0.01, far: 10000 }} dpr={[1, 2]} gl={{ antialias: true, alpha: true }} shadows={sceneSettings?.shadows}>
             <color attach="background" args={[sceneSettings?.background ?? "#0b2028"]} />
             {sceneSettings ? <ProjectCamera settings={sceneSettings} resetVersion={resetVersion} focusTarget={focusTarget} /> : null}
-            <ambientLight intensity={sceneSettings?.environment === "none" ? 0.5 : sceneSettings?.environment === "outdoor" ? 1.6 : 1.3} />
-            <directionalLight position={[5, 8, 6]} intensity={sceneSettings?.environment === "none" ? 1 : sceneSettings?.environment === "outdoor" ? 2.8 : 2.2} castShadow={sceneSettings?.shadows} />
-            <directionalLight position={[-5, 3, -5]} intensity={0.8} color="#a4d1cc" />
+            <ambientLight name="ambient" intensity={sceneSettings?.environment === "none" ? 0.5 : sceneSettings?.environment === "outdoor" ? 1.6 : 1.3} />
+            <directionalLight name="key" position={[5, 8, 6]} intensity={sceneSettings?.environment === "none" ? 1 : sceneSettings?.environment === "outdoor" ? 2.8 : 2.2} castShadow={sceneSettings?.shadows} />
+            <directionalLight name="fill" position={[-5, 3, -5]} intensity={0.8} color="#a4d1cc" />
             {showGrid ? <Grid position={[0, -1.2, 0]} infiniteGrid cellSize={0.5} sectionSize={2} cellColor="#21414a" sectionColor="#315862" fadeDistance={35} fadeStrength={1.4} /> : null}
             {sceneSettings?.controls !== "disabled" ? <OrbitControls key={`${resetVersion}:${focusTarget?.join(",") ?? "default"}`} makeDefault enableDamping minDistance={presentation ? 1e-9 : 0.01} maxDistance={presentation ? 1e12 : 10000} target={focusTarget ?? sceneSettings?.camera.target} autoRotate={sceneSettings?.controls === "turntable" && !reducedMotion && !sceneSettings?.reducedMotion} /> : null}
             <Bounds fit={!presentation} clip observe margin={1.3}>
-              <ModelScene key={modelUrl} modelUrl={modelUrl} primaryRelativePath={primaryRelativePath} files={files} autoPlay={!presentation && !reducedMotion && !sceneSettings?.reducedMotion} frameVersion={frameVersion} frameOnLoad={!presentation} frameCamera={sceneSettings?.camera} appearance={presentation?.snapshot.appearance.nodes} previewHiddenIds={presentation?.previewInteractions ? hiddenIds : undefined} animationPreview={presentation?.animationPreview} onClips={presentation?.onClips} onAnimationProgress={presentation?.onAnimationProgress} onSequenceWarnings={presentation?.onSequenceWarnings} onParts={presentation ? handleParts : undefined} onSelectPart={presentation?.previewInteractions ? undefined : presentation?.onSelectPart} onInteract={presentation?.previewInteractions ? handleInteraction : undefined} onMissingParts={presentation?.onMissingParts} onReady={onReady} />
+              <ModelScene key={modelUrl} modelUrl={modelUrl} primaryRelativePath={primaryRelativePath} files={files} autoPlay={!presentation && !reducedMotion && !sceneSettings?.reducedMotion} frameVersion={frameVersion} frameOnLoad={!presentation} frameCamera={sceneSettings?.camera} appearance={presentation?.snapshot.appearance.nodes} previewHiddenIds={presentation?.previewInteractions ? hiddenIds : undefined} animationPreview={presentation?.animationPreview} onClips={presentation?.onClips} onAnimationProgress={presentation?.onAnimationProgress} onSequenceWarnings={presentation?.onSequenceWarnings} timelinePreview={presentation?.timelinePreview} onTimelineProgress={presentation?.onTimelineProgress} onTimelineWarnings={presentation?.onTimelineWarnings} reducedMotion={reducedMotion || Boolean(sceneSettings?.reducedMotion)} onParts={presentation ? handleParts : undefined} onSelectPart={presentation?.previewInteractions ? undefined : presentation?.onSelectPart} onInteract={presentation?.previewInteractions ? handleInteraction : undefined} onMissingParts={presentation?.onMissingParts} onReady={onReady} />
             </Bounds>
           </Canvas>
           {loading ? <div className="viewer-loading" role="progressbar" aria-label="Loading model" aria-valuetext="Loading model"><span className="viewer-loader-orbit" aria-hidden="true" />Loading model</div> : null}

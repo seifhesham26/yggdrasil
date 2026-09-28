@@ -3,7 +3,7 @@ import type { ProjectSnapshot } from "../domain/project-state";
 
 type AppearanceOverride = ProjectSnapshot["appearance"]["nodes"][string];
 export type ScenePart = { id: string; name: string; type: string; object: Object3D };
-export type PartSummary = { id: string; name: string; type: string; parentName?: string; visible: boolean; position: [number, number, number]; worldPosition?: [number, number, number]; rotation: [number, number, number]; scale: [number, number, number]; materialName?: string; textureName?: string; hasUv?: boolean; color?: string; opacity?: number; roughness?: number; metalness?: number };
+export type PartSummary = { id: string; name: string; type: string; parentName?: string; visible: boolean; position: [number, number, number]; worldPosition?: [number, number, number]; rotation: [number, number, number]; scale: [number, number, number]; materialName?: string; textureName?: string; hasUv?: boolean; color?: string; opacity?: number; roughness?: number; metalness?: number; morphTargets?: string[] };
 
 export function summarizePart(part: ScenePart): PartSummary {
   const { object } = part;
@@ -20,6 +20,7 @@ export function summarizePart(part: ScenePart): PartSummary {
     ...(material ? { materialName: material.name || material.type } : {}),
     ...(standard?.map ? { textureName: standard.map.name || "Texture" } : {}),
     ...(object instanceof Mesh ? { hasUv: Boolean(object.geometry?.getAttribute?.("uv")) } : {}),
+    ...(object instanceof Mesh && object.morphTargetInfluences?.length ? { morphTargets: object.morphTargetInfluences.map((_, index) => Object.keys(object.morphTargetDictionary ?? {}).find((name) => object.morphTargetDictionary?.[name] === index) ?? `Morph ${index + 1}`) } : {}),
     ...(standard ? { color: `#${standard.color.getHexString()}`, opacity: standard.opacity, roughness: standard.roughness, metalness: standard.metalness } : {}),
   };
 }

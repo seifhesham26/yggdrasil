@@ -490,6 +490,62 @@ try {
   if (createHash("sha256").update(await (await page.request.get(fileUrl)).body()).digest("hex") !== sourceHash) throw new Error("Sequencing changed original model bytes.");
   console.log(`CLIP_SEQUENCE_RELOAD_GATE_PASS: crossfade controls, reorder, play/scrub pose differences ${sequenceDifference.toFixed(2)} and ${reloadedDifference.toFixed(2)} after reload, imported timing, and unchanged source hashes.`);
 
+  const timelinePanel = page.getByRole("region", { name: "Visual timelines" });
+  await timelinePanel.getByRole("button", { name: "Add timeline" }).click();
+  await timelinePanel.getByLabel("Timeline name").fill("Entrance motion");
+  await timelinePanel.getByLabel("Timeline target class").selectOption("part");
+  await timelinePanel.getByLabel("Timeline target", { exact: true }).selectOption(selectedPartId);
+  await timelinePanel.getByLabel("Timeline property").selectOption("position.x");
+  await timelinePanel.getByRole("button", { name: "Add track" }).click();
+  await timelinePanel.getByLabel("Track 1 keyframe 2 value").fill("2");
+  await timelinePanel.getByRole("slider", { name: "Scrub timeline" }).fill("0");
+  await page.waitForTimeout(200);
+  const timelineStart = await page.getByRole("region", { name: "Project preview" }).locator(".viewer-stage").screenshot();
+  await timelinePanel.getByRole("slider", { name: "Scrub timeline" }).fill("1");
+  await page.waitForTimeout(200);
+  const timelineEnd = await page.getByRole("region", { name: "Project preview" }).locator(".viewer-stage").screenshot();
+  const timelineDifference = await meanPixelDifference(timelineStart, timelineEnd);
+  if (timelineDifference < 0.5) throw new Error(`GSAP timeline scrub did not change the model (${timelineDifference.toFixed(2)}).`);
+  await timelinePanel.getByLabel("Timeline trigger", { exact: true }).selectOption("click");
+  await timelinePanel.getByLabel("Timeline trigger part").selectOption(selectedPartId);
+  await page.getByRole("button", { name: "Save project" }).click();
+  await page.locator(".save-state").getByText("Saved").waitFor();
+  const savedTimelineState = await (await page.request.get(`/api/projects/${projectId}`)).json() as { project: { revision: number; snapshot: { animation: { timelines: Array<{ id: string; name: string; trigger: { type: string; targetId: string }; tracks: Array<{ targetId: string; keyframes: Array<{ value: number }> }> }> } } } };
+  const [savedTimeline] = savedTimelineState.project.snapshot.animation.timelines;
+  if (savedTimeline.name !== "Entrance motion" || savedTimeline.trigger.type !== "click" || savedTimeline.trigger.targetId !== selectedPartId || savedTimeline.tracks[0]?.keyframes[1]?.value !== 2) throw new Error("Timeline target, trigger, or keyframe did not persist.");
+  const unsafeTimeline = await page.request.patch(`/api/projects/${projectId}`, { data: { action: "save", expectedRevision: savedTimelineState.project.revision, activeStep: "Animate", snapshot: { ...savedTimelineState.project.snapshot, animation: { ...savedTimelineState.project.snapshot.animation, timelines: [{ ...savedTimeline, tracks: [{ ...savedTimeline.tracks[0], property: "eval", script: "globalThis.unsafe = true" }] }] } } } });
+  if (unsafeTimeline.status() !== 400) throw new Error("Executable timeline payload was accepted.");
+  await page.reload();
+  await timelinePanel.getByRole("button", { name: "Entrance motion" }).click();
+  await timelinePanel.getByRole("slider", { name: "Scrub timeline" }).fill("0");
+  await page.waitForTimeout(200);
+  const reloadedTimelineStart = await page.getByRole("region", { name: "Project preview" }).locator(".viewer-stage").screenshot();
+  await timelinePanel.getByRole("slider", { name: "Scrub timeline" }).fill("1");
+  await page.waitForTimeout(200);
+  const reloadedTimelineEnd = await page.getByRole("region", { name: "Project preview" }).locator(".viewer-stage").screenshot();
+  const reloadedTimelineDifference = await meanPixelDifference(reloadedTimelineStart, reloadedTimelineEnd);
+  if (reloadedTimelineDifference < 0.5) throw new Error(`Reloaded GSAP timeline did not change the model (${reloadedTimelineDifference.toFixed(2)}).`);
+  await timelinePanel.getByRole("slider", { name: "Scrub timeline" }).fill("0");
+  await page.waitForTimeout(150);
+  const beforeTimelineClick = await page.getByRole("region", { name: "Project preview" }).locator(".viewer-stage").screenshot();
+  const timelineCanvas = page.locator(".project-editor-preview canvas").first();
+  const timelineCanvasBox = await timelineCanvas.boundingBox();
+  if (!timelineCanvasBox) throw new Error("Timeline preview canvas is missing.");
+  let clickedTimeline = false;
+  for (const [x, y] of [[0.48, 0.52], [0.5, 0.5], [0.43, 0.57], [0.55, 0.45], [0.4, 0.6]]) {
+    await timelineCanvas.click({ position: { x: timelineCanvasBox.width * x, y: timelineCanvasBox.height * y } });
+    await page.waitForTimeout(100);
+    const afterTimelineClick = await page.getByRole("region", { name: "Project preview" }).locator(".viewer-stage").screenshot();
+    if (await meanPixelDifference(beforeTimelineClick, afterTimelineClick) > 0.5) { clickedTimeline = true; break; }
+  }
+  if (!clickedTimeline) throw new Error("Click trigger did not move the model in the timeline preview.");
+  await timelinePanel.getByRole("slider", { name: "Scrub timeline" }).fill("0");
+  await timelinePanel.getByRole("button", { name: "Play timeline" }).click();
+  await page.waitForTimeout(200);
+  if (Number((await timelinePanel.locator("output").textContent())?.split(" ")[0]) < 1.9) throw new Error("Reduced-motion timeline playback did not jump to its final state.");
+  if (createHash("sha256").update(await (await page.request.get(fileUrl)).body()).digest("hex") !== sourceHash) throw new Error("Timeline edits changed original model bytes.");
+  console.log(`VISUAL_TIMELINE_RELOAD_GATE_PASS: typed click track and keyframe persisted; scrub differences ${timelineDifference.toFixed(2)} and ${reloadedTimelineDifference.toFixed(2)} after reload; click trigger, reduced motion, and unsafe payload checks passed.`);
+
   await page.emulateMedia({ reducedMotion: "reduce" });
   for (const [name, scale] of [["tiny", 0.00001], ["large", 100000]] as const) {
     await page.goto("/library");

@@ -14,6 +14,10 @@ import { projectFramePosition } from "./project-framing";
 import { advanceClip, clipTime, inspectClips, playableClip, type AnimationPreview, type ClipSource } from "./animation-clips";
 import { importedClipAnimation } from "./imported-clips";
 import { SequencePlayer, sequenceDuration, sequenceWarnings } from "./clip-sequence";
+import { VisualTimelinePlayer, type VisualTimeline } from "./visual-timeline";
+import { ScrollTrigger } from "gsap/ScrollTrigger";
+import gsap from "gsap";
+import { Light } from "three";
 
 const TRANSPARENT_PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/9xkAAAAASUVORK5CYII=";
 
@@ -70,7 +74,7 @@ export function disposeLoadedScene(root: Object3D): void {
   for (const texture of textures) texture.dispose();
 }
 
-export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, frameVersion, frameOnLoad = true, frameCamera, appearance, previewHiddenIds, animationPreview, onClips, onAnimationProgress, onSequenceWarnings, onParts, onSelectPart, onInteract, onMissingParts, onReady }: {
+export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, frameVersion, frameOnLoad = true, frameCamera, appearance, previewHiddenIds, animationPreview, onClips, onAnimationProgress, onSequenceWarnings, timelinePreview, onTimelineProgress, onTimelineWarnings, reducedMotion = false, onParts, onSelectPart, onInteract, onMissingParts, onReady }: {
   modelUrl: string;
   primaryRelativePath: string;
   files: ViewerFile[];
@@ -84,6 +88,10 @@ export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, fra
   onClips?: (clips: ClipSource[]) => void;
   onAnimationProgress?: (progress: number, finished: boolean) => void;
   onSequenceWarnings?: (warnings: string[]) => void;
+  timelinePreview?: { timeline: VisualTimeline; progress: number; playing: boolean; restartToken: number } | null;
+  onTimelineProgress?: (progress: number, finished: boolean) => void;
+  onTimelineWarnings?: (warnings: string[]) => void;
+  reducedMotion?: boolean;
   onParts?: (parts: PartSummary[]) => void;
   onSelectPart?: (id: string) => void;
   onInteract?: (id: string, trigger: "click" | "hover") => void;
@@ -95,8 +103,10 @@ export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, fra
   const mixer = useRef<AnimationMixer | null>(null);
   const playback = useRef<{ mixer: AnimationMixer; action: AnimationAction; time: number; direction: 1 | -1; lastReport: number } | null>(null);
   const sequencePlayback = useRef<{ player: SequencePlayer; time: number; duration: number; lastReport: number } | null>(null);
+  const timelinePlayback = useRef<{ player: VisualTimelinePlayer; time: number; duration: number; lastReport: number } | null>(null);
   const bounds = useBounds();
   const camera = useThree((state) => state.camera);
+  const canvasScene = useThree((state) => state.scene);
   const sceneData = useMemo(() => {
     if (!gltf) return null;
     const scene = cloneSkeleton(gltf.scene);
@@ -217,6 +227,36 @@ export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, fra
     state.player.seek(state.time, sequence.sequenceLoop);
   }, [sequence, animationPreview?.progress, animationPreview?.playing]);
 
+  const timeline = timelinePreview?.timeline;
+  useEffect(() => {
+    if (!scene || !timeline) return;
+    const lights: Record<string, Light> = {};
+    canvasScene.traverse((object) => { if (object instanceof Light && object.name) lights[object.name] = object; });
+    const player = new VisualTimelinePlayer(timeline, scene, camera, lights, reducedMotion);
+    onTimelineWarnings?.(player.warnings);
+    timelinePlayback.current = { player, time: 0, duration: timeline.durationSeconds, lastReport: 0 };
+    if (timeline.trigger.type === "start" || timeline.trigger.type === "model-loaded") player.fire(timeline.trigger.type);
+    let scroll: ScrollTrigger | null = null;
+    if (timeline.trigger.type === "scroll") {
+      gsap.registerPlugin(ScrollTrigger);
+      const stage = document.querySelector(".viewer-stage");
+      if (stage) scroll = ScrollTrigger.create({ trigger: stage, start: "top 80%", onEnter: () => player.fire("scroll"), onEnterBack: () => player.fire("scroll") });
+    }
+    return () => { scroll?.kill(); player.dispose(); if (timelinePlayback.current?.player === player) timelinePlayback.current = null; };
+  }, [scene, timeline, camera, canvasScene, reducedMotion, timelinePreview?.restartToken, onTimelineWarnings]);
+
+  useEffect(() => {
+    const clipId = selectedEdit?.id ?? (sequence ? "sequence" : null);
+    if (animationPreview?.playing && clipId) timelinePlayback.current?.player.fire("clip-start", clipId);
+  }, [animationPreview?.playing, selectedEdit?.id, sequence]);
+
+  useEffect(() => {
+    const state = timelinePlayback.current;
+    if (!state || timelinePreview?.playing) return;
+    state.time = state.duration * (timelinePreview?.progress ?? 0);
+    state.player.seek(state.duration ? state.time / state.duration : 0);
+  }, [timelinePreview?.progress, timelinePreview?.playing, timeline]);
+
   useEffect(() => {
     if (!selectedEdit || !playback.current || animationPreview?.playing) return;
     const state = playback.current;
@@ -226,6 +266,18 @@ export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, fra
   }, [animationPreview?.progress, animationPreview?.playing, selectedEdit, gltf]);
 
   useFrame((_, delta) => {
+    const timelineState = timelinePlayback.current;
+    if (timelineState && timelinePreview?.playing) {
+      timelineState.time = Math.min(timelineState.duration, timelineState.time + Math.min(delta, 0.1));
+      const finished = timelineState.time >= timelineState.duration || reducedMotion;
+      if (reducedMotion) timelineState.time = timelineState.duration;
+      timelineState.player.seek(timelineState.duration ? timelineState.time / timelineState.duration : 1);
+      const now = performance.now();
+      if (finished || now - timelineState.lastReport > 100) {
+        timelineState.lastReport = now;
+        onTimelineProgress?.(timelineState.time / timelineState.duration, finished);
+      }
+    }
     const sequenceState = sequencePlayback.current;
     if (sequence && sequenceState) {
       if (!animationPreview?.playing || !sequenceState.duration) return;
@@ -237,6 +289,7 @@ export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, fra
       if (finished || now - sequenceState.lastReport > 100) {
         sequenceState.lastReport = now;
         onAnimationProgress?.(sequenceState.time / sequenceState.duration, finished);
+        if (finished) timelinePlayback.current?.player.fire("clip-end", "sequence");
       }
       return;
     }
@@ -250,6 +303,7 @@ export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, fra
     if (next.finished || now - state.lastReport > 100) {
       state.lastReport = now;
       onAnimationProgress?.((next.time - selectedEdit.trimStart) / (selectedEdit.trimEnd - selectedEdit.trimStart), next.finished);
+      if (next.finished) timelinePlayback.current?.player.fire("clip-end", selectedEdit.id);
     }
   });
 
@@ -258,8 +312,8 @@ export function ModelScene({ modelUrl, primaryRelativePath, files, autoPlay, fra
   // SkeletonUtils clones the hierarchy and bones but shares geometry/materials
   // with this preview's loader. The loader effect disposes them on unmount.
   const partFor = (object: Object3D) => sceneData?.parts.find((item) => item.object === object);
-  return <primitive object={scene} onClick={onSelectPart || onInteract ? (event: { object: Object3D; stopPropagation: () => void }) => {
+  return <primitive object={scene} onClick={onSelectPart || onInteract || timeline ? (event: { object: Object3D; stopPropagation: () => void }) => {
     const part = partFor(event.object);
-    if (part) { event.stopPropagation(); if (onInteract) onInteract(part.id, "click"); else onSelectPart?.(part.id); }
-  } : undefined} onPointerOver={onInteract ? (event: { object: Object3D; stopPropagation: () => void }) => { const part = partFor(event.object); if (part) { event.stopPropagation(); onInteract(part.id, "hover"); } } : undefined} />;
+    if (part) { event.stopPropagation(); timelinePlayback.current?.player.fire("click", part.id); if (onInteract) onInteract(part.id, "click"); else onSelectPart?.(part.id); }
+  } : undefined} onPointerOver={onInteract || timeline ? (event: { object: Object3D; stopPropagation: () => void }) => { const part = partFor(event.object); if (part) { event.stopPropagation(); timelinePlayback.current?.player.fire("hover", part.id); onInteract?.(part.id, "hover"); } } : undefined} />;
 }

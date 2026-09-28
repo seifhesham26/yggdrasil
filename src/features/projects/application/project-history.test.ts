@@ -43,6 +43,17 @@ describe("ProjectHistory", () => {
     expect((await history.redo("owner-1", created.project.id)).project.snapshot.animation.sequence).toEqual(snapshot.animation.sequence);
   });
 
+  it("persists visual timeline tracks and trigger through undo and redo", async () => {
+    const history = new ProjectHistory(new InMemoryProjectRepository({ "asset-1": "version-1" }));
+    const created = await history.create({ ownerId: "owner-1", assetId: "asset-1" });
+    const snapshot = defaultProjectSnapshot();
+    snapshot.animation.timelines = [{ id: crypto.randomUUID(), name: "Open", enabled: true, durationSeconds: 2, trigger: { type: "click", targetId: "0:Mesh:Face" }, tracks: [{ id: crypto.randomUUID(), target: "part", targetId: "0:Mesh:Face", property: "position.x", keyframes: [{ at: 0, value: 0 }, { at: 2, value: 3 }] }] }];
+    await history.save({ ownerId: "owner-1", projectId: created.project.id, expectedRevision: 0, snapshot, activeStep: "Animate" });
+    expect((await history.load("owner-1", created.project.id))?.project.snapshot.animation.timelines).toEqual(snapshot.animation.timelines);
+    expect((await history.undo("owner-1", created.project.id)).project.snapshot.animation.timelines).toEqual([]);
+    expect((await history.redo("owner-1", created.project.id)).project.snapshot.animation.timelines).toEqual(snapshot.animation.timelines);
+  });
+
   it("requires an explicit retained asset version fixture", async () => {
     const history = new ProjectHistory(new InMemoryProjectRepository({}));
     await expect(history.create({ ownerId: "owner-1", assetId: "asset-1" })).rejects.toThrow(/fixture/i);

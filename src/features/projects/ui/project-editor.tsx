@@ -11,6 +11,7 @@ import type { PartSummary } from "./scene-parts";
 import { SceneControls, type PreviewSize } from "./scene-controls";
 import { InteractionControls } from "./interaction-controls";
 import { AnimationControls } from "./animation-controls";
+import { TimelineControls } from "./timeline-controls";
 import { sourceClipEdit, type ClipSource } from "@/features/viewer/animation-clips";
 import type { ImportedClipAttachment } from "@/features/viewer/imported-clips";
 
@@ -44,9 +45,16 @@ export function ProjectEditor({ initialState, assetName, model }: { initialState
   const [clipProgress, setClipProgress] = useState(0);
   const [clipPlaying, setClipPlaying] = useState(false);
   const [clipRestartToken, setClipRestartToken] = useState(0);
+  const [selectedTimelineId, setSelectedTimelineId] = useState<string | null>(null);
+  const [timelineProgress, setTimelineProgress] = useState(0);
+  const [timelinePlaying, setTimelinePlaying] = useState(false);
+  const [timelineRestartToken, setTimelineRestartToken] = useState(0);
+  const [timelineWarnings, setTimelineWarnings] = useState<string[]>([]);
   const onClips = useCallback((clips: ClipSource[]) => setClipSources(clips), []);
   const onSequenceWarnings = useCallback((warnings: string[]) => setSequenceWarnings((current) => JSON.stringify(current) === JSON.stringify(warnings) ? current : warnings), []);
   const onAnimationProgress = useCallback((progress: number, finished: boolean) => { setClipProgress(progress); if (finished) setClipPlaying(false); }, []);
+  const onTimelineProgress = useCallback((progress: number, finished: boolean) => { setTimelineProgress(progress); if (finished) setTimelinePlaying(false); }, []);
+  const onTimelineWarnings = useCallback((warnings: string[]) => setTimelineWarnings((current) => JSON.stringify(current) === JSON.stringify(warnings) ? current : warnings), []);
   const selectClip = useCallback((key: string) => { setSelectedClipKey(key); setClipProgress(0); setClipPlaying(false); setClipRestartToken((value) => value + 1); }, []);
   const onParts = useCallback((next: PartSummary[]) => { setParts(next); setSelectedId((current) => current ?? next[0]?.id ?? null); }, []);
   const onMissingParts = useCallback((ids: string[]) => setMissingParts(ids), []);
@@ -197,6 +205,7 @@ export function ProjectEditor({ initialState, assetName, model }: { initialState
   const selectedSource = clipSources[sourceIndex];
   const selectedImported = snapshot.animation.importedClips.find((clip) => clip.id === selectedClipKey) ?? null;
   const previewClip = useMemo(() => selectedCopy ?? (selectedSource ? { ...sourceClipEdit(selectedSource), id: `source-${sourceIndex}` } : null), [selectedCopy, selectedSource, sourceIndex]);
+  const selectedTimeline = snapshot.animation.timelines.find((item) => item.id === selectedTimelineId);
   return <main className="project-editor">
     <div className="project-editor-header">
       <div><Link href={`/assets/${serverState.project.assetId}`}>← {assetName}</Link><p className="section-kicker">Project editor</p><h1>{serverState.project.name}</h1></div>
@@ -205,11 +214,11 @@ export function ProjectEditor({ initialState, assetName, model }: { initialState
     {message ? <div role="alert" className="project-save-error"><span>{message}</span><button type="button" onClick={() => void save(pendingStep ?? activeStep)}>Retry save</button></div> : null}
     <nav className="project-step-nav" aria-label="Project steps"><ol>{projectStepNames.map((step, index) => { const record = serverState.steps.find((item) => item.name === step); return <li key={step}><button type="button" aria-label={`${step} step`} aria-current={activeStep === step ? "step" : undefined} onClick={() => void navigate(step)} disabled={busy}><span>{String(index + 1).padStart(2, "0")}</span><strong>{step}</strong><small>{activeStep === step && (dirty || status === "error") ? "Unsaved" : record?.status ?? "not-started"}</small></button></li>; })}</ol></nav>
     <div className="project-editor-grid">
-      <section className="project-editor-preview" aria-label="Project preview" data-preview-size={previewSize}><ModelCanvasLoader key={previewingInteractions && activeStep === "Interactions" ? "preview" : "edit"} {...model} presentation={{ snapshot, onParts, onSelectPart: selectFromViewport, onMissingParts, previewInteractions: previewingInteractions && activeStep === "Interactions", onClips, onAnimationProgress, onSequenceWarnings, animationPreview: activeStep === "Animate" ? { clip: selectedClipKey === "sequence" ? null : previewClip, importedClip: selectedClipKey === "sequence" ? null : selectedImported, sequence: selectedClipKey === "sequence" ? snapshot.animation : null, playing: clipPlaying, progress: clipProgress, restartToken: clipRestartToken } : undefined }} /></section>
+      <section className="project-editor-preview" aria-label="Project preview" data-preview-size={previewSize}><ModelCanvasLoader key={previewingInteractions && activeStep === "Interactions" ? "preview" : "edit"} {...model} presentation={{ snapshot, onParts, onSelectPart: selectFromViewport, onMissingParts, previewInteractions: previewingInteractions && activeStep === "Interactions", onClips, onAnimationProgress, onSequenceWarnings, animationPreview: activeStep === "Animate" ? { clip: selectedClipKey === "sequence" ? null : previewClip, importedClip: selectedClipKey === "sequence" ? null : selectedImported, sequence: selectedClipKey === "sequence" ? snapshot.animation : null, playing: clipPlaying, progress: clipProgress, restartToken: clipRestartToken } : undefined, timelinePreview: activeStep === "Animate" && selectedTimeline ? { timeline: selectedTimeline, progress: timelineProgress, playing: timelinePlaying, restartToken: timelineRestartToken } : null, onTimelineProgress, onTimelineWarnings }} /></section>
       <section className="project-editor-panel" aria-label={`${activeStep} controls`}>
         <p className="section-kicker">Step {projectStepNames.indexOf(activeStep) + 1} of 8</p><h2>{activeStep}</h2>
         <fieldset disabled={busy}>
-          {activeStep === "Appearance" ? <AppearanceControls snapshot={snapshot} parts={parts} selectedId={selectedId} selectionOrigin={selectionOrigin} onSelect={selectFromHierarchy} onChange={edit} missing={missingParts} /> : activeStep === "Scene" ? <SceneControls key={snapshot.scene.camera.fov} snapshot={snapshot} onChange={edit} previewSize={previewSize} onPreviewSize={setPreviewSize} /> : activeStep === "Interactions" ? <InteractionControls snapshot={snapshot} parts={parts} previewing={previewingInteractions} onPreview={setPreviewingInteractions} onChange={edit} /> : activeStep === "Animate" ? <AnimationControls snapshot={snapshot} sources={clipSources} parts={parts} sequenceWarnings={sequenceWarnings} selectedKey={selectedClipKey} progress={clipProgress} playing={clipPlaying} onSelect={selectClip} onProgress={(progress) => { setClipProgress(progress); setClipPlaying(false); }} onPlaying={setClipPlaying} onRestart={() => { setClipProgress(0); setClipRestartToken((value) => value + 1); }} onChange={edit} onImport={dirty ? undefined : importClip} /> : <p>This step is available for navigation. Its editing controls follow in the roadmap.</p>}
+          {activeStep === "Appearance" ? <AppearanceControls snapshot={snapshot} parts={parts} selectedId={selectedId} selectionOrigin={selectionOrigin} onSelect={selectFromHierarchy} onChange={edit} missing={missingParts} /> : activeStep === "Scene" ? <SceneControls key={snapshot.scene.camera.fov} snapshot={snapshot} onChange={edit} previewSize={previewSize} onPreviewSize={setPreviewSize} /> : activeStep === "Interactions" ? <InteractionControls snapshot={snapshot} parts={parts} previewing={previewingInteractions} onPreview={setPreviewingInteractions} onChange={edit} /> : activeStep === "Animate" ? <><AnimationControls snapshot={snapshot} sources={clipSources} parts={parts} sequenceWarnings={sequenceWarnings} selectedKey={selectedClipKey} progress={clipProgress} playing={clipPlaying} onSelect={selectClip} onProgress={(progress) => { setClipProgress(progress); setClipPlaying(false); }} onPlaying={setClipPlaying} onRestart={() => { setClipProgress(0); setClipRestartToken((value) => value + 1); }} onChange={edit} onImport={dirty ? undefined : importClip} /><TimelineControls snapshot={snapshot} parts={parts} selectedId={selectedTimelineId} progress={timelineProgress} playing={timelinePlaying} warnings={timelineWarnings} onSelect={(id) => { setSelectedTimelineId(id); setTimelinePlaying(false); setTimelineProgress(0); setTimelineRestartToken((value) => value + 1); }} onProgress={(progress) => { setTimelineProgress(progress); setTimelinePlaying(false); }} onPlaying={setTimelinePlaying} onChange={edit} /></> : <p>This step is available for navigation. Its editing controls follow in the roadmap.</p>}
         </fieldset>
       </section>
     </div>
